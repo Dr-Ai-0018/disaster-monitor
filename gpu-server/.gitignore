@@ -1,0 +1,10 @@
+# Runtime outputs
+logs/
+temp/
+cache/
+
+# Model weights
+models/*.pth
+models/*.bin
+models/*.safetensors
+models/disaster_model/

@@ -1,0 +1,36 @@
+# Global ignores
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.swp
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.python-version
+
+# Environment/config files
+.env
+.env.*
+*.secret
+*.pem
+
+# Databases & cache blobs
+*.db
+*.db-wal
+*.db-shm
+
+# Repository data dumps (user-requested)
+reference/

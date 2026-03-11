@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>灾害监测与分析系统</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+  <style>
+    [v-cloak] { display: none; }
+    .fade-enter-active, .fade-leave-active { transition: opacity .2s; }
+    .fade-enter-from, .fade-leave-to { opacity: 0; }
+    .status-badge { @apply px-2 py-0.5 rounded-full text-xs font-semibold; }
+    .scrollbar-thin::-webkit-scrollbar { width: 4px; }
+    .scrollbar-thin::-webkit-scrollbar-track { background: #1e293b; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: #475569; border-radius: 2px; }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen font-sans">
+<div id="app" v-cloak>
+
+  <!-- Login Screen -->
+  <div v-if="!token" class="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl p-8 w-full max-w-sm">
+      <div class="text-center mb-8">
+        <div class="text-4xl mb-3">🌍</div>
+        <h1 class="text-2xl font-bold text-white">灾害监测系统</h1>
+        <p class="text-slate-400 text-sm mt-1">Disaster Monitoring System</p>
+      </div>
+      <div class="space-y-4">
+        <input v-model="loginForm.username" @keyup.enter="login"
+          type="text" placeholder="用户名" autocomplete="username"
+          class="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2.5 text-white placeholder-slate-400 focus:outline-none focus:border-blue-500" />
+        <input v-model="loginForm.password" @keyup.enter="login"
+          type="password" placeholder="密码" autocomplete="current-password"
+          class="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2.5 text-white placeholder-slate-400 focus:outline-none focus:border-blue-500" />
+        <div v-if="loginError" class="text-red-400 text-sm text-center">{{ loginError }}</div>
+        <button @click="login" :disabled="loginLoading"
+          class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 text-white font-semibold py-2.5 rounded-lg transition-colors">
+          {{ loginLoading ? '登录中...' : '登录' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main App -->
+  <div v-else class="flex h-screen overflow-hidden">
+
+    <!-- Sidebar -->
+    <aside class="w-56 bg-slate-800 border-r border-slate-700 flex flex-col shrink-0">
+      <div class="px-4 py-5 border-b border-slate-700">
+        <div class="flex items-center gap-2">
+          <span class="text-2xl">🌍</span>
+          <div>
+            <div class="text-sm font-bold text-white">灾害监测系统</div>
+            <div class="text-xs text-slate-400">v1.0.0</div>
+          </div>
+        </div>
+      </div>
+      <nav class="flex-1 p-3 space-y-1 overflow-y-auto scrollbar-thin">
+        <button v-for="item in navItems" :key="item.id" @click="currentPage = item.id"
+          :class="['w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors',
+            currentPage === item.id ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700']">
+          <span class="text-base">{{ item.icon }}</span>
+          <span>{{ item.label }}</span>
+          <span v-if="item.badge && stats[item.badge]"
+            class="ml-auto bg-slate-600 text-slate-200 text-xs px-1.5 py-0.5 rounded-full">
+            {{ stats[item.badge] }}
+          </span>
+        </button>
+      </nav>
+      <div class="p-3 border-t border-slate-700">
+        <button @click="logout" class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-700 text-sm transition-colors">
+          <span>🚪</span><span>退出登录</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 overflow-auto bg-slate-900">
+
+      <!-- Dashboard -->
+      <div v-if="currentPage === 'dashboard'" class="p-6 space-y-6">
+        <div class="flex items-center justify-between">
+          <h2 class="text-xl font-bold">系统概览</h2>
+          <button @click="loadDashboard" class="text-sm text-blue-400 hover:text-blue-300">🔄 刷新</button>
+        </div>
+        <!-- Stats Grid -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div v-for="card in dashboardCards" :key="card.label" class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+            <div class="text-2xl mb-2">{{ card.icon }}</div>
+            <div class="text-2xl font-bold text-white">{{ card.value }}</div>
+            <div class="text-sm text-slate-400">{{ card.label }}</div>
+          </div>
+        </div>
+        <!-- Status Breakdown -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div class="bg-slate-800 rounded-xl p-5 border border-slate-700">
+            <h3 class="font-semibold mb-4 text-slate-200">事件状态分布</h3>
+            <div class="space-y-2">
+              <div v-for="(count, status) in (systemStatus.database?.by_status || {})" :key="status"
+                class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span :class="statusColor(status)" class="w-2 h-2 rounded-full"></span>
+                  <span class="text-sm text-slate-300">{{ statusLabel(status) }}</span>
+                </div>
+                <span class="text-sm font-semibold text-white">{{ count }}</span>
+              </div>
+            </div>
+          </div>
+          <div class="bg-slate-800 rounded-xl p-5 border border-slate-700">
+            <h3 class="font-semibold mb-4 text-slate-200">系统组件状态</h3>
+            <div class="space-y-3">
+              <div class="flex items-center justify-between">
+                <span class="text-sm text-slate-300">🛢 数据库</span>
+                <span class="text-sm text-green-400">{{ systemStatus.database?.size_mb || 0 }} MB</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-sm text-slate-300">🌍 GEE</span>
+                <span :class="systemStatus.gee?.authenticated ? 'text-green-400' : 'text-red-400'" class="text-sm">
+                  {{ systemStatus.gee?.authenticated ? '已连接' : '未连接' }}
+                </span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-sm text-slate-300">⏰ 调度器</span>
+                <span :class="systemStatus.scheduler?.running ? 'text-green-400' : 'text-yellow-400'" class="text-sm">
+                  {{ systemStatus.scheduler?.running ? '运行中' : '已停止' }}
+                </span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-sm text-slate-300">🖥 GPU 任务</span>
+                <span class="text-sm text-white">
+                  待处理: {{ systemStatus.database?.tasks_pending || 0 }} |
+                  进行中: {{ systemStatus.database?.tasks_locked || 0 }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Events Page -->
+      <div v-if="currentPage === 'events'" class="p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-xl font-bold">灾害事件</h2>
+          <button @click="triggerJob('fetch_rsoe_data')"
+            class="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg transition-colors">
+            ⬇ 立即抓取
+          </button>
+        </div>
+        <!-- Filters -->
+        <div class="flex flex-wrap gap-3 bg-slate-800 p-4 rounded-xl border border-slate-700">
+          <select v-model="eventFilters.status" @change="loadEvents(1)"
+            class="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none">
+            <option value="">全部状态</option>
+            <option v-for="s in eventStatuses" :key="s.value" :value="s.value">{{ s.label }}</option>
+          </select>
+          <select v-model="eventFilters.severity" @change="loadEvents(1)"
+            class="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none">
+            <option value="">全部严重程度</option>
+            <option value="extreme">极高</option>
+            <option value="high">高</option>
+            <option value="medium">中</option>
+            <option value="low">低</option>
+          </select>
+          <input v-model="eventFilters.country" @input="debouncedLoadEvents"
+            placeholder="按国家搜索..." 
+            class="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-400 focus:outline-none w-40" />
+          <span class="ml-auto text-sm text-slate-400 self-center">共 {{ eventTotal }} 条</span>
+        </div>
+        <!-- Table -->
+        <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-700 text-slate-300">
+                <tr>
+                  <th class="px-4 py-3 text-left font-medium">事件</th>
+                  <th class="px-4 py-3 text-left font-medium">类型</th>
+                  <th class="px-4 py-3 text-left font-medium">国家</th>
+                  <th class="px-4 py-3 text-left font-medium">严重程度</th>
+                  <th class="px-4 py-3 text-left font-medium">状态</th>
+                  <th class="px-4 py-3 text-left font-medium">影像</th>
+                  <th class="px-4 py-3 text-left font-medium">时间</th>
+                  <th class="px-4 py-3 text-left font-medium">操作</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-700">
+                <tr v-if="eventsLoading">
+                  <td colspan="8" class="px-4 py-8 text-center text-slate-400">加载中...</td>
+                </tr>
+                <tr v-else-if="events.length === 0">
+                  <td colspan="8" class="px-4 py-8 text-center text-slate-400">暂无数据</td>
+                </tr>
+                <tr v-for="ev in events" :key="ev.uuid" class="hover:bg-slate-700/50 transition-colors">
+                  <td class="px-4 py-3 max-w-xs">
+                    <div class="font-medium text-white truncate" :title="ev.title">{{ ev.title }}</div>
+                    <div class="text-xs text-slate-400">ID: {{ ev.event_id }}</div>
+                  </td>
+                  <td class="px-4 py-3">
+                    <span class="bg-slate-700 text-slate-200 text-xs px-2 py-0.5 rounded">{{ ev.category || '-' }}</span>
+                  </td>
+                  <td class="px-4 py-3 text-slate-300">{{ ev.country || '-' }}</td>
+                  <td class="px-4 py-3">
+                    <span :class="severityClass(ev.severity)" class="text-xs font-semibold px-2 py-0.5 rounded-full">
+                      {{ severityLabel(ev.severity) }}
+                    </span>
+                  </td>
+                  <td class="px-4 py-3">
+                    <span :class="statusBadgeClass(ev.status)" class="text-xs font-semibold px-2 py-0.5 rounded-full">
+                      {{ statusLabel(ev.status) }}
+                    </span>
+                  </td>
+                  <td class="px-4 py-3">
+                    <div class="flex gap-1">
+                      <span :class="ev.pre_image_downloaded ? 'text-green-400' : 'text-slate-600'" title="灾前影像">⬛</span>
+                      <span :class="ev.post_image_downloaded ? 'text-blue-400' : 'text-slate-600'" title="灾后影像">⬛</span>
+                      <span :class="ev.quality_pass ? 'text-yellow-400' : 'text-slate-600'" title="质量通过">✓</span>
+                    </div>
+                  </td>
+                  <td class="px-4 py-3 text-xs text-slate-400">{{ formatDate(ev.event_date) }}</td>
+                  <td class="px-4 py-3">
+                    <button @click="triggerEventProcess(ev.uuid, ev.status)"
+                      class="text-xs text-blue-400 hover:text-blue-300 transition-colors">推进</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <!-- Pagination -->
+          <div class="px-4 py-3 border-t border-slate-700 flex items-center justify-between">
+            <span class="text-sm text-slate-400">第 {{ eventPage }} / {{ eventPages }} 页</span>
+            <div class="flex gap-2">
+              <button @click="loadEvents(eventPage - 1)" :disabled="eventPage <= 1"
+                class="px-3 py-1 text-sm bg-slate-700 hover:bg-slate-600 disabled:opacity-40 rounded transition-colors">上一页</button>
+              <button @click="loadEvents(eventPage + 1)" :disabled="eventPage >= eventPages"
+                class="px-3 py-1 text-sm bg-slate-700 hover:bg-slate-600 disabled:opacity-40 rounded transition-colors">下一页</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Products Page -->
+      <div v-if="currentPage === 'products'" class="p-6 space-y-4">
+        <h2 class="text-xl font-bold">成品池</h2>
+        <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-700 text-slate-300">
+                <tr>
+                  <th class="px-4 py-3 text-left font-medium">事件</th>
+                  <th class="px-4 py-3 text-left font-medium">类型</th>
+                  <th class="px-4 py-3 text-left font-medium">国家</th>
+                  <th class="px-4 py-3 text-left font-medium">摘要</th>
+                  <th class="px-4 py-3 text-left font-medium">时间</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-700">
+                <tr v-if="productsLoading">
+                  <td colspan="5" class="px-4 py-8 text-center text-slate-400">加载中...</td>
+                </tr>
+                <tr v-else-if="products.length === 0">
+                  <td colspan="5" class="px-4 py-8 text-center text-slate-400">暂无成品数据</td>
+                </tr>
+                <tr v-for="p in products" :key="p.uuid" class="hover:bg-slate-700/50">
+                  <td class="px-4 py-3 max-w-xs">
+                    <div class="font-medium text-white truncate">{{ p.event_title || p.uuid.slice(0,8) }}</div>
+                  </td>
+                  <td class="px-4 py-3">
+                    <span class="bg-slate-700 text-slate-200 text-xs px-2 py-0.5 rounded">{{ p.event_category || '-' }}</span>
+                  </td>
+                  <td class="px-4 py-3 text-slate-300">{{ p.event_country || '-' }}</td>
+                  <td class="px-4 py-3 max-w-sm">
+                    <div v-if="p.summary" class="text-xs text-slate-300 truncate" :title="p.summary">{{ p.summary }}</div>
+                    <span v-else class="text-xs text-slate-500 italic">待生成摘要</span>
+                  </td>
+                  <td class="px-4 py-3 text-xs text-slate-400">{{ formatDate(p.created_at) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Reports Page -->
+      <div v-if="currentPage === 'reports'" class="p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-xl font-bold">灾害日报</h2>
+          <button @click="generateReport" class="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg transition-colors">
+            📋 生成昨日日报
+          </button>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <!-- Report List -->
+          <div class="lg:col-span-1 bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+            <div class="p-4 border-b border-slate-700 text-sm font-medium text-slate-300">日报列表</div>
+            <div class="overflow-y-auto max-h-[600px] scrollbar-thin">
+              <div v-if="reports.length === 0" class="p-4 text-sm text-slate-400 text-center">暂无日报</div>
+              <button v-for="r in reports" :key="r.id" @click="loadReportDetail(r.report_date)"
+                :class="['w-full text-left px-4 py-3 border-b border-slate-700 hover:bg-slate-700 transition-colors',
+                  selectedReport?.report_date === r.report_date ? 'bg-slate-700' : '']">
+                <div class="font-medium text-sm text-white">{{ r.report_date }}</div>
+                <div class="text-xs text-slate-400 mt-0.5">{{ r.event_count }} 个事件</div>
+                <span v-if="r.published" class="text-xs text-green-400">● 已发布</span>
+                <span v-else class="text-xs text-slate-500">○ 未发布</span>
+              </button>
+            </div>
+          </div>
+          <!-- Report Detail -->
+          <div class="lg:col-span-2 bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+            <div v-if="!selectedReport" class="flex items-center justify-center h-64 text-slate-400 text-sm">
+              请选择一份日报查看详情
+            </div>
+            <div v-else class="h-full flex flex-col">
+              <div class="flex items-center justify-between p-4 border-b border-slate-700">
+                <div>
+                  <h3 class="font-semibold text-white">{{ selectedReport.report_title }}</h3>
+                  <div class="text-xs text-slate-400 mt-1">
+                    {{ selectedReport.event_count }} 个事件 · 
+                    {{ selectedReport.generation_time_seconds?.toFixed(1) }}s 生成
+                  </div>
+                </div>
+                <button v-if="!selectedReport.published" @click="publishReport(selectedReport.report_date)"
+                  class="text-sm bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg transition-colors">
+                  发布
+                </button>
+              </div>
+              <div class="overflow-y-auto flex-1 p-4 scrollbar-thin">
+                <pre class="whitespace-pre-wrap text-sm text-slate-300 font-mono">{{ selectedReport.report_content }}</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Admin Page -->
+      <div v-if="currentPage === 'admin'" class="p-6 space-y-4">
+        <h2 class="text-xl font-bold">系统管理</h2>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <!-- Manual Job Trigger -->
+          <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+            <h3 class="font-semibold mb-4 text-slate-200">手动触发任务</h3>
+            <div class="space-y-2">
+              <div v-for="job in manualJobs" :key="job.id" class="flex items-center justify-between">
+                <div>
+                  <div class="text-sm font-medium text-white">{{ job.label }}</div>
+                  <div class="text-xs text-slate-400">{{ job.desc }}</div>
+                </div>
+                <button @click="triggerJob(job.id)"
+                  class="text-sm bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-lg transition-colors">
+                  执行
+                </button>
+              </div>
+            </div>
+          </div>
+          <!-- Token Management -->
+          <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+            <h3 class="font-semibold mb-4 text-slate-200">API Token 管理</h3>
+            <div class="space-y-3 mb-4">
+              <div v-for="t in apiTokens" :key="t.token" class="flex items-center justify-between bg-slate-700 rounded-lg px-3 py-2">
+                <div>
+                  <div class="text-sm font-medium text-white">{{ t.name }}</div>
+                  <div class="text-xs text-slate-400">使用 {{ t.usage_count }} 次</div>
+                </div>
+                <span :class="t.is_active ? 'text-green-400' : 'text-red-400'" class="text-xs font-semibold">
+                  {{ t.is_active ? '启用' : '禁用' }}
+                </span>
+              </div>
+              <div v-if="apiTokens.length === 0" class="text-sm text-slate-400 text-center py-2">暂无 Token</div>
+            </div>
+            <div class="flex gap-2">
+              <input v-model="newTokenName" placeholder="Token 名称"
+                class="flex-1 bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-400 focus:outline-none" />
+              <button @click="createToken" class="bg-blue-600 hover:bg-blue-700 text-white text-sm px-3 py-1.5 rounded-lg transition-colors">
+                创建
+              </button>
+            </div>
+            <div v-if="newTokenResult" class="mt-3 p-3 bg-green-900/30 border border-green-700 rounded-lg">
+              <div class="text-xs text-green-300 font-mono break-all">{{ newTokenResult }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- Toast -->
+  <transition name="fade">
+    <div v-if="toast" :class="['fixed bottom-6 right-6 px-4 py-3 rounded-xl shadow-xl text-sm font-medium z-50',
+      toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-green-600 text-white']">
+      {{ toast.message }}
+    </div>
+  </transition>
+
+</div>
+
+<script>
+const { createApp, ref, reactive, computed, onMounted } = Vue;
+
+createApp({
+  setup() {
+    const API = '';  // same origin
+    const token = ref(localStorage.getItem('token') || '');
+    const loginForm = reactive({ username: 'admin', password: '' });
+    const loginError = ref('');
+    const loginLoading = ref(false);
+    const currentPage = ref('dashboard');
+    const toast = ref(null);
+    const systemStatus = ref({});
+
+    const navItems = [
+      { id: 'dashboard', icon: '📊', label: '系统概览' },
+      { id: 'events',    icon: '🌋', label: '灾害事件',  badge: 'pendingCount' },
+      { id: 'products',  icon: '📦', label: '成品池' },
+      { id: 'reports',   icon: '📋', label: '灾害日报' },
+      { id: 'admin',     icon: '⚙️', label: '系统管理' },
+    ];
+    const stats = reactive({ pendingCount: 0 });
+
+    // ── API Helper ────────────────────────────────
+    const api = axios.create({ baseURL: API });
+    api.interceptors.request.use(cfg => {
+      if (token.value) cfg.headers['Authorization'] = 'Bearer ' + token.value;
+      return cfg;
+    });
+    api.interceptors.response.use(r => r, err => {
+      if (err.response?.status === 401) {
+        token.value = '';
+        localStorage.removeItem('token');
+      }
+      return Promise.reject(err);
+    });
+
+    function showToast(message, type = 'success') {
+      toast.value = { message, type };
+      setTimeout(() => { toast.value = null; }, 3000);
+    }
+
+    // ── Auth ──────────────────────────────────────
+    async function login() {
+      loginLoading.value = true;
+      loginError.value = '';
+      try {
+        const r = await api.post('/api/auth/login', loginForm);
+        token.value = r.data.access_token;
+        localStorage.setItem('token', token.value);
+        loadDashboard();
+      } catch (e) {
+        loginError.value = e.response?.data?.detail || '登录失败';
+      } finally {
+        loginLoading.value = false;
+      }
+    }
+    function logout() {
+      token.value = '';
+      localStorage.removeItem('token');
+    }
+
+    // ── Dashboard ─────────────────────────────────
+    async function loadDashboard() {
+      try {
+        const [statusR, statsR] = await Promise.all([
+          api.get('/api/admin/status'),
+          api.get('/api/events/stats'),
+        ]);
+        systemStatus.value = statusR.data;
+        const s = statsR.data;
+        stats.pendingCount = (s.by_status?.pending || 0) + (s.by_status?.pool || 0);
+        dashboardCards.value = [
+          { icon: '🌋', label: '总事件数',   value: s.total_events || 0 },
+          { icon: '📦', label: '已完成分析', value: statusR.data.database?.products_count || 0 },
+          { icon: '⏳', label: 'GPU 队列',   value: statusR.data.database?.tasks_pending || 0 },
+          { icon: '📋', label: '近24小时',   value: s.recent_24h || 0 },
+        ];
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    const dashboardCards = ref([]);
+
+    // ── Events ────────────────────────────────────
+    const events = ref([]);
+    const eventsLoading = ref(false);
+    const eventPage = ref(1);
+    const eventPages = ref(1);
+    const eventTotal = ref(0);
+    const eventFilters = reactive({ status: '', severity: '', country: '' });
+    const eventStatuses = [
+      { value: 'pending',    label: '待处理' },
+      { value: 'pool',       label: '蓄水池' },
+      { value: 'checked',    label: '质检通过' },
+      { value: 'queued',     label: '已入队' },
+      { value: 'processing', label: '推理中' },
+      { value: 'completed',  label: '已完成' },
+    ];
+
+    async function loadEvents(page = 1) {
+      eventsLoading.value = true;
+      try {
+        const params = { page, limit: 20, ...eventFilters };
+        Object.keys(params).forEach(k => !params[k] && delete params[k]);
+        const r = await api.get('/api/events', { params });
+        events.value = r.data.data;
+        eventPage.value = r.data.page;
+        eventPages.value = r.data.pages;
+        eventTotal.value = r.data.total;
+      } catch (e) {
+        showToast('加载事件失败', 'error');
+      } finally {
+        eventsLoading.value = false;
+      }
+    }
+
+    let debTimer = null;
+    function debouncedLoadEvents() {
+      clearTimeout(debTimer);
+      debTimer = setTimeout(() => loadEvents(1), 500);
+    }
+
+    async function triggerEventProcess(uuid, status) {
+      try {
+        await api.post(`/api/events/${uuid}/process`);
+        showToast('处理已触发');
+        setTimeout(() => loadEvents(eventPage.value), 1500);
+      } catch (e) {
+        showToast('触发失败', 'error');
+      }
+    }
+
+    // ── Products ──────────────────────────────────
+    const products = ref([]);
+    const productsLoading = ref(false);
+
+    async function loadProducts() {
+      productsLoading.value = true;
+      try {
+        const r = await api.get('/api/products', { params: { limit: 50 } });
+        products.value = r.data.data;
+      } finally {
+        productsLoading.value = false;
+      }
+    }
+
+    // ── Reports ───────────────────────────────────
+    const reports = ref([]);
+    const selectedReport = ref(null);
+
+    async function loadReports() {
+      const r = await api.get('/api/reports', { params: { limit: 30 } });
+      reports.value = r.data.data;
+    }
+
+    async function loadReportDetail(date) {
+      try {
+        const r = await api.get(`/api/reports/${date}`);
+        selectedReport.value = r.data;
+      } catch (e) {
+        showToast('加载日报失败', 'error');
+      }
+    }
+
+    async function generateReport() {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const date = yesterday.toISOString().split('T')[0];
+      try {
+        await api.post('/api/reports/generate', { date });
+        showToast(`日报生成任务已启动 (${date})`);
+        setTimeout(loadReports, 3000);
+      } catch (e) {
+        showToast('生成失败', 'error');
+      }
+    }
+
+    async function publishReport(date) {
+      try {
+        await api.put(`/api/reports/${date}/publish`);
+        showToast('日报已发布');
+        await loadReportDetail(date);
+        loadReports();
+      } catch (e) {
+        showToast('发布失败', 'error');
+      }
+    }
+
+    // ── Admin ─────────────────────────────────────
+    const apiTokens = ref([]);
+    const newTokenName = ref('');
+    const newTokenResult = ref('');
+    const manualJobs = [
+      { id: 'fetch_rsoe_data',      label: '抓取 RSOE 数据',   desc: '从 RSOE-EDIS 拉取最新灾害事件' },
+      { id: 'process_pool',         label: '处理蓄水池',       desc: '推进事件状态流转' },
+      { id: 'release_timeout_locks',label: '释放超时锁',       desc: '清理卡死的 GPU 任务' },
+      { id: 'generate_daily_report',label: '生成日报',         desc: '生成昨日灾害日报' },
+    ];
+
+    async function loadTokens() {
+      try {
+        const r = await api.get('/api/admin/tokens');
+        apiTokens.value = r.data;
+      } catch (e) {}
+    }
+
+    async function createToken() {
+      if (!newTokenName.value.trim()) return;
+      try {
+        const r = await api.post('/api/admin/tokens', { name: newTokenName.value });
+        newTokenResult.value = r.data.token;
+        newTokenName.value = '';
+        showToast('Token 已创建，请复制保存！');
+        loadTokens();
+      } catch (e) {
+        showToast('创建失败', 'error');
+      }
+    }
+
+    async function triggerJob(jobId) {
+      try {
+        await api.post(`/api/admin/jobs/${jobId}/trigger`);
+        showToast(`任务 "${jobId}" 已触发`);
+      } catch (e) {
+        showToast('触发失败', 'error');
+      }
+    }
+
+    // ── Helpers ───────────────────────────────────
+    function statusLabel(s) {
+      const m = { pending:'待处理', pool:'蓄水池', checked:'质检通过', queued:'已入队', processing:'推理中', completed:'已完成', failed:'失败' };
+      return m[s] || s;
+    }
+    function statusColor(s) {
+      const m = { pending:'bg-yellow-400', pool:'bg-blue-400', checked:'bg-cyan-400', queued:'bg-purple-400', processing:'bg-orange-400', completed:'bg-green-400', failed:'bg-red-400' };
+      return m[s] || 'bg-slate-400';
+    }
+    function statusBadgeClass(s) {
+      const m = { pending:'bg-yellow-900/50 text-yellow-300', pool:'bg-blue-900/50 text-blue-300', checked:'bg-cyan-900/50 text-cyan-300', queued:'bg-purple-900/50 text-purple-300', processing:'bg-orange-900/50 text-orange-300', completed:'bg-green-900/50 text-green-300', failed:'bg-red-900/50 text-red-300' };
+      return m[s] || 'bg-slate-700 text-slate-300';
+    }
+    function severityLabel(s) {
+      const m = { extreme:'极高', high:'高', medium:'中', low:'低' };
+      return m[s] || s || '-';
+    }
+    function severityClass(s) {
+      const m = { extreme:'bg-red-900/60 text-red-300', high:'bg-orange-900/60 text-orange-300', medium:'bg-yellow-900/60 text-yellow-300', low:'bg-green-900/60 text-green-300' };
+      return m[s] || 'bg-slate-700 text-slate-300';
+    }
+    function formatDate(ts) {
+      if (!ts) return '-';
+      return new Date(ts).toLocaleDateString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+    }
+
+    // ── Page Switch ───────────────────────────────
+    const _watchPage = (page) => {
+      if (page === 'dashboard') loadDashboard();
+      if (page === 'events') loadEvents(1);
+      if (page === 'products') loadProducts();
+      if (page === 'reports') loadReports();
+      if (page === 'admin') { loadDashboard(); loadTokens(); }
+    };
+
+    onMounted(() => {
+      if (token.value) _watchPage(currentPage.value);
+      // auto-refresh dashboard
+    });
+
+    return {
+      token, loginForm, loginError, loginLoading,
+      currentPage, navItems, stats, systemStatus, dashboardCards,
+      events, eventsLoading, eventPage, eventPages, eventTotal, eventFilters, eventStatuses,
+      products, productsLoading,
+      reports, selectedReport,
+      apiTokens, newTokenName, newTokenResult, manualJobs,
+      toast,
+      login, logout,
+      loadDashboard,
+      loadEvents, debouncedLoadEvents, triggerEventProcess,
+      loadProducts,
+      loadReports, loadReportDetail, generateReport, publishReport,
+      loadTokens, createToken, triggerJob,
+      statusLabel, statusColor, statusBadgeClass,
+      severityLabel, severityClass, formatDate,
+      _watchPage,
+    };
+  },
+  watch: {
+    currentPage(newPage) { this._watchPage(newPage); }
+  }
+}).mount('#app');
+</script>
+</body>
+</html>

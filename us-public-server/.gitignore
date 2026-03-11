@@ -1,0 +1,17 @@
+.env
+*.db
+*.db-wal
+*.db-shm
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+logs/
+storage/html/
+storage/json/
+storage/images/
+storage/reports/
+database/disaster.db
+config/service_account.json
+backups/

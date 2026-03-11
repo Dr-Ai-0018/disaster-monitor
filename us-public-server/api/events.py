@@ -1,0 +1,207 @@
+"""
+事件管理 API 路由
+"""
+import json
+import math
+from typing import Optional
+from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from sqlalchemy.orm import Session
+
+from models.models import AdminUser, Event, get_db
+from schemas.schemas import (
+    EventListResponse, EventSummary, EventDetail, EventStatsResponse, MessageResponse
+)
+from utils.auth import get_current_admin
+
+router = APIRouter(prefix="/api/events", tags=["事件管理"])
+
+
+def _event_to_summary(e: Event) -> EventSummary:
+    return EventSummary(
+        uuid=e.uuid,
+        event_id=e.event_id,
+        sub_id=e.sub_id or 0,
+        title=e.title,
+        category=e.category,
+        category_name=e.category_name,
+        country=e.country,
+        continent=e.continent,
+        severity=e.severity,
+        longitude=e.longitude,
+        latitude=e.latitude,
+        event_date=e.event_date,
+        last_update=e.last_update,
+        status=e.status,
+        pre_image_downloaded=bool(e.pre_image_downloaded),
+        post_image_downloaded=bool(e.post_image_downloaded),
+        quality_pass=bool(e.quality_pass),
+        created_at=e.created_at,
+        updated_at=e.updated_at,
+    )
+
+
+def _event_to_detail(e: Event) -> EventDetail:
+    qa = None
+    if e.quality_assessment:
+        try:
+            qa = json.loads(e.quality_assessment)
+        except Exception:
+            qa = e.quality_assessment
+    dj = None
+    if e.details_json:
+        try:
+            dj = json.loads(e.details_json)
+        except Exception:
+            dj = e.details_json
+
+    return EventDetail(
+        uuid=e.uuid,
+        event_id=e.event_id,
+        sub_id=e.sub_id or 0,
+        title=e.title,
+        category=e.category,
+        category_name=e.category_name,
+        country=e.country,
+        continent=e.continent,
+        severity=e.severity,
+        longitude=e.longitude,
+        latitude=e.latitude,
+        address=e.address,
+        event_date=e.event_date,
+        last_update=e.last_update,
+        details_json=dj,
+        source_url=e.source_url,
+        status=e.status,
+        pre_image_downloaded=bool(e.pre_image_downloaded),
+        pre_image_path=e.pre_image_path,
+        pre_image_date=e.pre_image_date,
+        pre_image_source=e.pre_image_source,
+        post_image_downloaded=bool(e.post_image_downloaded),
+        post_image_path=e.post_image_path,
+        post_image_date=e.post_image_date,
+        post_image_source=e.post_image_source,
+        quality_score=e.quality_score,
+        quality_assessment=qa,
+        quality_checked=bool(e.quality_checked),
+        quality_check_time=e.quality_check_time,
+        quality_pass=bool(e.quality_pass),
+        created_at=e.created_at,
+        updated_at=e.updated_at,
+    )
+
+
+@router.get("", response_model=EventListResponse)
+def list_events(
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=100),
+    status: Optional[str] = None,
+    category: Optional[str] = None,
+    country: Optional[str] = None,
+    severity: Optional[str] = None,
+    start_date: Optional[int] = None,
+    end_date: Optional[int] = None,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    q = db.query(Event)
+    if status:
+        q = q.filter(Event.status == status)
+    if category:
+        q = q.filter(Event.category == category.upper())
+    if country:
+        q = q.filter(Event.country.ilike(f"%{country}%"))
+    if severity:
+        q = q.filter(Event.severity == severity.lower())
+    if start_date:
+        q = q.filter(Event.event_date >= start_date)
+    if end_date:
+        q = q.filter(Event.event_date <= end_date)
+
+    total = q.count()
+    events = q.order_by(Event.event_date.desc()).offset((page - 1) * limit).limit(limit).all()
+
+    return EventListResponse(
+        total=total,
+        page=page,
+        limit=limit,
+        pages=math.ceil(total / limit) if total else 0,
+        data=[_event_to_summary(e) for e in events],
+    )
+
+
+@router.get("/stats", response_model=EventStatsResponse)
+def get_stats(
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    from sqlalchemy import func
+
+    all_events = db.query(Event).all()
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    day_ms = 86400 * 1000
+
+    by_status: dict = {}
+    by_category: dict = {}
+    by_severity: dict = {}
+    recent_24h = 0
+
+    for e in all_events:
+        by_status[e.status] = by_status.get(e.status, 0) + 1
+        if e.category:
+            by_category[e.category] = by_category.get(e.category, 0) + 1
+        if e.severity:
+            by_severity[e.severity] = by_severity.get(e.severity, 0) + 1
+        if e.created_at and (now_ms - e.created_at) <= day_ms:
+            recent_24h += 1
+
+    return EventStatsResponse(
+        total_events=len(all_events),
+        by_status=by_status,
+        by_category=by_category,
+        by_severity=by_severity,
+        recent_24h=recent_24h,
+    )
+
+
+@router.get("/{uuid}", response_model=EventDetail)
+def get_event(
+    uuid: str,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    event = db.query(Event).filter(Event.uuid == uuid).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="事件不存在")
+    return _event_to_detail(event)
+
+
+@router.post("/{uuid}/process", response_model=MessageResponse)
+def trigger_process(
+    uuid: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    event = db.query(Event).filter(Event.uuid == uuid).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="事件不存在")
+
+    def _run():
+        from core.pool_manager import PoolManager
+        from models.models import get_session_factory
+        s = get_session_factory()()
+        try:
+            pm = PoolManager(s)
+            if event.status == "pending":
+                pm.process_pending_events(limit=1)
+            elif event.status == "pool":
+                pm.submit_gee_tasks_for_pool(limit=1)
+                pm.assess_ready_events(limit=1)
+            elif event.status == "checked":
+                pm.enqueue_checked_events(limit=1)
+        finally:
+            s.close()
+
+    background_tasks.add_task(_run)
+    return MessageResponse(message=f"事件 {uuid} 处理已触发，当前状态: {event.status}")

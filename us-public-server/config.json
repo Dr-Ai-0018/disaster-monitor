@@ -1,0 +1,124 @@
+{
+  "app": {
+    "name": "Disaster Monitoring System",
+    "version": "1.0.0",
+    "timezone": "UTC"
+  },
+
+  "rsoe": {
+    "base_url": "https://rsoe-edis.org",
+    "api_base": "https://rsoe-edis.org/gateway/webapi",
+    "request_timeout": 30,
+    "request_delay": 1.5,
+    "max_retries": 3,
+    "retry_delay": 5
+  },
+
+  "gee": {
+    "dataset": "COPERNICUS/S2_SR_HARMONIZED",
+    "fallback_datasets": [
+      "LANDSAT/LC08/C02/T1_L2",
+      "LANDSAT/LC09/C02/T1_L2"
+    ],
+    "cloud_threshold": 20,
+    "time_window_days_before": 30,
+    "time_window_days_after": 30,
+    "scale": 10,
+    "buffer_km": 10,
+    "max_concurrent_tasks": 100,
+    "task_check_interval_minutes": 60,
+    "quota_warning_threshold": 2000,
+    "quota_pause_threshold": 2800
+  },
+
+  "quality_assessment": {
+    "enabled": true,
+    "cloud_coverage_threshold": 30,
+    "pass_score_threshold": 60,
+    "max_retries": 2,
+    "assessment_timeout": 60
+  },
+
+  "task_queue": {
+    "default_lock_duration_seconds": 7200,
+    "heartbeat_interval_seconds": 300,
+    "max_retries": 3,
+    "priority_weights": {
+      "severity_extreme": 100,
+      "severity_high": 50,
+      "severity_medium": 20,
+      "severity_low": 10,
+      "recent_7d": 50,
+      "recent_30d": 20
+    },
+    "tasks": [
+      {"task_id": 1, "type": "IMG_CAP",     "prompt": "Describe this satellite image in detail, focusing on visible land features, structures, and any signs of damage or disaster impact."},
+      {"task_id": 2, "type": "IMG_VQA",     "prompt": "Is there visible disaster impact (damage, destruction, flooding, fire, or other hazards) in this image? Answer only: Yes or No."},
+      {"task_id": 3, "type": "IMG_VQA",     "prompt": "What type of disaster or hazard is shown in this image? Answer with a short phrase (e.g., 'wildfire', 'flooding', 'earthquake damage', 'none')."},
+      {"task_id": 4, "type": "IMG_CT",      "prompt": "Describe the main land-cover types and any visible changes or abnormal areas compared to a normal state."},
+      {"task_id": 5, "type": "PIX_SEG",     "prompt": "Segment the affected/damaged area in this image. Output polygons with <poly> ... </poly>."},
+      {"task_id": 6, "type": "PIX_CHG",     "prompt": "Locate areas that appear changed or affected by the disaster. Output polygons with <poly> ... </poly>."},
+      {"task_id": 7, "type": "REG_DET_HBB", "prompt": "Detect affected or damaged regions in this image. Output horizontal bounding boxes."}
+    ]
+  },
+
+  "scheduler": {
+    "fetch_rsoe_data": {
+      "enabled": true,
+      "cron": "0 2 * * *",
+      "description": "每天凌晨2点抓取RSOE数据"
+    },
+    "check_gee_tasks": {
+      "enabled": true,
+      "interval_hours": 1,
+      "description": "每小时检查GEE任务状态"
+    },
+    "process_pool": {
+      "enabled": true,
+      "interval_hours": 1,
+      "description": "每小时处理蓄水池，推进事件状态"
+    },
+    "generate_daily_report": {
+      "enabled": true,
+      "cron": "0 7 * * *",
+      "description": "每天早上7点生成日报"
+    },
+    "release_timeout_locks": {
+      "enabled": true,
+      "interval_minutes": 10,
+      "description": "每10分钟释放超时锁"
+    },
+    "cleanup_old_data": {
+      "enabled": true,
+      "cron": "0 3 * * 0",
+      "description": "每周日凌晨3点清理旧数据",
+      "retention_days": 90
+    }
+  },
+
+  "report_generation": {
+    "top_events_count": 5,
+    "max_summary_length": 300,
+    "temperature": 0.7
+  },
+
+  "storage": {
+    "html_path": "storage/html",
+    "json_path": "storage/json",
+    "images_path": "storage/images",
+    "reports_path": "storage/reports",
+    "max_storage_gb": 500,
+    "cleanup_enabled": true
+  },
+
+  "api": {
+    "rate_limit": {
+      "admin": {"requests": 1000, "period_hours": 1},
+      "tasks": {"requests": 10000, "period_hours": 1}
+    },
+    "pagination": {
+      "default_limit": 50,
+      "max_limit": 100
+    }
+  }
+}

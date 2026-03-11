@@ -1,0 +1,64 @@
+{
+  "worker": {
+    "id": "gpu-server-1",
+    "name": "内网GPU服务器1",
+    "version": "1.0.0"
+  },
+
+  "api": {
+    "base_url": "http://127.0.0.1:8000",
+    "timeout": 300,
+    "max_retries": 3,
+    "retry_delay": 10
+  },
+
+  "polling": {
+    "interval_seconds": 3600,
+    "max_tasks_per_pull": 5,
+    "enabled": true
+  },
+
+  "heartbeat": {
+    "interval_seconds": 300,
+    "enabled": true
+  },
+
+  "model": {
+    "name": "disaster-recognition-v1",
+    "version": "1.0.0",
+    "path": "models/disaster_model",
+    "device": "cuda",
+    "precision": "fp16",
+    "warmup_iterations": 2
+  },
+
+  "inference": {
+    "batch_size": 1,
+    "max_image_size": 1024,
+    "normalize": true,
+    "mean": [0.485, 0.456, 0.406],
+    "std": [0.229, 0.224, 0.225]
+  },
+
+  "tasks": {
+    "IMG_CAP":     { "enabled": true,  "max_tokens": 300 },
+    "IMG_VQA":     { "enabled": true,  "max_tokens": 50  },
+    "IMG_CT":      { "enabled": true,  "max_tokens": 300 },
+    "PIX_SEG":     { "enabled": true,  "max_tokens": 500 },
+    "PIX_CHG":     { "enabled": true,  "max_tokens": 500 },
+    "REG_DET_HBB": { "enabled": true,  "max_tokens": 300 },
+    "REG_VG":      { "enabled": false, "max_tokens": 200 }
+  },
+
+  "storage": {
+    "temp_dir": "temp",
+    "cache_dir": "cache",
+    "auto_cleanup": true,
+    "max_cache_size_gb": 20
+  },
+
+  "monitoring": {
+    "gpu_monitor_enabled": true,
+    "log_gpu_stats_interval_seconds": 300
+  }
+}
