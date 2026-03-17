@@ -45,6 +45,14 @@ class Event(Base):
     quality_checked = Column(Integer, default=0)
     quality_pass = Column(Integer, default=0)
     quality_check_time = Column(Integer)
+    # 动态影像追踪
+    pre_window_days = Column(Integer, default=7)
+    pre_imagery_last_check = Column(Integer)
+    pre_imagery_exhausted = Column(Integer, default=0)
+    post_window_days = Column(Integer, default=7)
+    post_imagery_last_check = Column(Integer)
+    post_imagery_open = Column(Integer, default=1)
+    imagery_check_count = Column(Integer, default=0)
 
 
 class GeeTask(Base):

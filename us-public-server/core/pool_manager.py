@@ -146,7 +146,7 @@ class PoolManager:
     # ── 2. pool → 提交 GEE 下载任务 ─────────────────────────
 
     def submit_gee_tasks_for_pool(self, limit: int = 20) -> int:
-        """为蓄水池中未下载影像的事件提交 GEE 任务"""
+        """为蓄水池中未下载影像的事件提交 GEE 任务（使用各事件的当前窗口大小）"""
         if self.gee.is_quota_exceeded():
             logger.warning("GEE 配额已超上限，暂停提交")
             return 0
@@ -170,17 +170,23 @@ class PoolManager:
             now = _now_ms()
             event_ts = event.event_date or now
 
-            if not event.pre_image_downloaded:
-                self._submit_single_gee_task(event, event_ts, "pre_disaster")
-            if not event.post_image_downloaded:
-                self._submit_single_gee_task(event, event_ts, "post_disaster")
+            if not event.pre_image_downloaded and not event.pre_imagery_exhausted:
+                self._submit_single_gee_task(
+                    event, event_ts, "pre_disaster",
+                    window_days=event.pre_window_days or 7,
+                )
+            if not event.post_image_downloaded and event.post_imagery_open:
+                self._submit_single_gee_task(
+                    event, event_ts, "post_disaster",
+                    window_days=event.post_window_days or 7,
+                )
 
             event.updated_at = now
             submitted += 1
 
         self.db.commit()
 
-        # 处理 GEE 永久失败的 pool 事件（无可用影像）
+        # 仅对窗口已耗尽的事件推进状态
         self._advance_no_imagery_events()
 
         return submitted
@@ -213,21 +219,17 @@ class PoolManager:
             if active:
                 continue
 
-            # 各类型任务状态
-            pre_ok   = self.db.query(GeeTask).filter(GeeTask.uuid == event.uuid, GeeTask.task_type == "pre_disaster",  GeeTask.status == "COMPLETED").first()
-            pre_fail = self.db.query(GeeTask).filter(GeeTask.uuid == event.uuid, GeeTask.task_type == "pre_disaster",  GeeTask.status == "FAILED").first()
-            post_ok  = self.db.query(GeeTask).filter(GeeTask.uuid == event.uuid, GeeTask.task_type == "post_disaster", GeeTask.status == "COMPLETED").first()
-            post_fail= self.db.query(GeeTask).filter(GeeTask.uuid == event.uuid, GeeTask.task_type == "post_disaster", GeeTask.status == "FAILED").first()
-
-            # 必须至少尝试过一次（有 FAILED 记录），否则跳过
-            if not pre_fail and not post_fail:
-                continue
+            # 只有当两类影像都"终止搜索"后，才推进
+            pre_done = event.pre_image_downloaded or event.pre_imagery_exhausted
+            post_done = event.post_image_downloaded or (event.post_imagery_open == 0)
+            if not (pre_done and post_done):
+                continue  # 还有窗口可扩，等待 recheck 再试
 
             # 标记失败影像为"已尝试"（避免 assess_ready_events 处理时崩溃）
-            if pre_fail and not pre_ok and not event.pre_image_downloaded:
+            if not event.pre_image_downloaded and event.pre_imagery_exhausted:
                 event.pre_image_downloaded = 1
                 event.pre_image_path = None
-            if post_fail and not post_ok and not event.post_image_downloaded:
+            if not event.post_image_downloaded and event.post_imagery_open == 0:
                 event.post_image_downloaded = 1
                 event.post_image_path = None
 
@@ -258,14 +260,28 @@ class PoolManager:
 
         return advanced
 
-    def _submit_single_gee_task(self, event: Event, event_ts: int, task_type: str):
-        """提交单个 GEE 任务并记录到 gee_tasks 表"""
+    def _submit_single_gee_task(
+        self,
+        event: Event,
+        event_ts: int,
+        task_type: str,
+        window_days: int = None,
+        allow_retry: bool = False,
+    ):
+        """
+        提交单个 GEE 任务并记录到 gee_tasks 表。
+
+        allow_retry=False（默认，正常首次提交）：PENDING/RUNNING/FAILED 均跳过，防止立即重试。
+        allow_retry=True（recheck 调用）：仅跳过 PENDING/RUNNING，允许对旧的 FAILED 记录发起
+        新一轮下载（以当前扩展后的窗口为准）。
+        """
+        skip_statuses = ["PENDING", "RUNNING"] if allow_retry else ["PENDING", "RUNNING", "FAILED"]
         existing = (
             self.db.query(GeeTask)
             .filter(
                 GeeTask.uuid == event.uuid,
                 GeeTask.task_type == task_type,
-                GeeTask.status.in_(["PENDING", "RUNNING", "FAILED"]),  # FAILED 也跳过，防止无限重试
+                GeeTask.status.in_(skip_statuses),
             )
             .first()
         )
@@ -290,6 +306,7 @@ class PoolManager:
             latitude=event.latitude,
             event_timestamp_ms=event_ts,
             task_type=task_type,
+            window_days=window_days,
         )
 
         if result_str:
@@ -305,18 +322,46 @@ class PoolManager:
                 event.pre_image_path = result.get("save_path")
                 event.pre_image_date = result.get("image_date_ms")
                 event.pre_image_source = result.get("source")
+                event.pre_imagery_last_check = now
             else:
                 event.post_image_downloaded = 1
                 event.post_image_path = result.get("save_path")
                 event.post_image_date = result.get("image_date_ms")
                 event.post_image_source = result.get("source")
+                event.post_imagery_open = 0
+                event.post_imagery_last_check = now
 
             logger.info(f"[{event.uuid[:8]}] {task_type} 下载完成")
         else:
             gee_task.status = "FAILED"
             gee_task.failure_reason = "GEE 返回空结果"
+
+            max_win = self.task_cfg.get("max_imagery_window_days",
+                                        self.gee.cfg.get("max_imagery_window_days", 60))
+            if task_type == "pre_disaster":
+                cur = event.pre_window_days or 7
+                new_win = cur + 7
+                event.pre_imagery_last_check = now
+                if new_win > max_win:
+                    event.pre_imagery_exhausted = 1
+                    logger.warning(f"[{event.uuid[:8]}] 灾前影像达到最大窗口 {max_win}d，停止搜索")
+                else:
+                    event.pre_window_days = new_win
+                    logger.info(f"[{event.uuid[:8]}] 灾前影像未找到，窗口扩展至 {new_win}d")
+            else:
+                cur = event.post_window_days or 7
+                new_win = cur + 7
+                event.post_imagery_last_check = now
+                if new_win > max_win:
+                    event.post_imagery_open = 0
+                    logger.warning(f"[{event.uuid[:8]}] 灾后影像达到最大窗口 {max_win}d，停止追踪")
+                else:
+                    event.post_window_days = new_win
+                    logger.info(f"[{event.uuid[:8]}] 灾后影像未找到，窗口扩展至 {new_win}d（将在下次检查时重试）")
+
             logger.warning(f"[{event.uuid[:8]}] {task_type} 下载失败")
 
+        event.imagery_check_count = (event.imagery_check_count or 0) + 1
         gee_task.updated_at = _now_ms()
 
     # ── 3. pool (有双影像) → checked（质量评估） ─────────────
@@ -443,7 +488,99 @@ class PoolManager:
             "tasks": task_definitions,
         }
 
-    # ── 5. 释放超时锁 ─────────────────────────────────────
+    # ── 5. 动态影像补全（灾后轮询 + 灾前扩窗） ──────────────
+
+    def recheck_open_imagery(self, limit: int = 20) -> int:
+        """
+        每小时：对 post_imagery_open=1 且灾后影像未下载的事件，
+        每 24h 重新尝试 GEE 下载（使用当前 post_window_days）。
+        成功→记录影像路径、关闭追踪；失败→扩展窗口或关闭追踪。
+        """
+        recheck_interval_ms = int(
+            self.gee.cfg.get("imagery_recheck_interval_hours", 24) * 3600 * 1000
+        )
+        now = _now_ms()
+        threshold = now - recheck_interval_ms
+
+        events = (
+            self.db.query(Event)
+            .filter(
+                Event.status == "pool",
+                Event.post_image_downloaded == 0,
+                Event.post_imagery_open == 1,
+                Event.longitude.isnot(None),
+                Event.latitude.isnot(None),
+            )
+            .filter(
+                (Event.post_imagery_last_check.is_(None)) |
+                (Event.post_imagery_last_check < threshold)
+            )
+            .limit(limit)
+            .all()
+        )
+
+        success = 0
+        for event in events:
+            try:
+                event_ts = event.event_date or now
+                self._submit_single_gee_task(
+                    event, event_ts, "post_disaster",
+                    window_days=event.post_window_days or 7,
+                    allow_retry=True,  # recheck：允许越过旧 FAILED 记录重试
+                )
+                if event.post_image_downloaded:
+                    success += 1
+                    # 若灾前影像也已就绪，重置质量检查以触发评估
+                    if event.pre_image_downloaded and event.quality_checked:
+                        event.quality_checked = 0
+                        event.quality_pass = 0
+                event.updated_at = now
+            except Exception as e:
+                logger.error(f"[{event.uuid[:8]}] recheck post imagery 失败: {e}")
+
+        if events:
+            self.db.commit()
+        return success
+
+    def recheck_pre_imagery(self, limit: int = 20) -> int:
+        """
+        对灾前影像未下载且未 exhausted 的 pool 事件，自动扩窗重查。
+        历史影像随时可用，无 24h 间隔限制（直到窗口耗尽或下载成功）。
+        """
+        events = (
+            self.db.query(Event)
+            .filter(
+                Event.status == "pool",
+                Event.pre_image_downloaded == 0,
+                Event.pre_imagery_exhausted == 0,
+                Event.longitude.isnot(None),
+                Event.latitude.isnot(None),
+            )
+            .limit(limit)
+            .all()
+        )
+
+        success = 0
+        now = _now_ms()
+        for event in events:
+            try:
+                event_ts = event.event_date or now
+                self._submit_single_gee_task(
+                    event, event_ts, "pre_disaster",
+                    window_days=event.pre_window_days or 7,
+                    allow_retry=True,  # recheck：允许越过旧 FAILED 记录重试
+                )
+                if event.pre_image_downloaded:
+                    success += 1
+                event.updated_at = now
+            except Exception as e:
+                logger.error(f"[{event.uuid[:8]}] recheck pre imagery 失败: {e}")
+
+        if events:
+            self.db.commit()
+        return success
+
+    # ── 6. 释放超时锁 ─────────────────────────────────────
 
     def release_timeout_locks(self) -> int:
         """释放超时的任务锁，将 locked 任务重置为 pending"""

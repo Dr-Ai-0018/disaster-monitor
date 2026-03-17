@@ -66,17 +66,19 @@ class GeeManager:
         latitude: float,
         event_timestamp_ms: int,
         task_type: str = "post_disaster",
+        window_days: int = None,
     ) -> Optional[str]:
         """
-        提交 GEE 影像下载任务，返回 GEE task_id。
+        提交 GEE 影像下载任务，返回结果 JSON 字符串。
         task_type: 'pre_disaster' | 'post_disaster'
+        window_days: 覆盖 config 中的默认时间窗口（天数）
         """
         if not _gee_initialized:
             logger.error("GEE 未初始化，无法提交任务")
             return None
 
         event_dt = datetime.fromtimestamp(event_timestamp_ms / 1000, tz=timezone.utc)
-        window = self.cfg.get("time_window_days_before", 30)
+        window = window_days if window_days is not None else self.cfg.get("time_window_days_before", 30)
 
         if task_type == "pre_disaster":
             end_dt = event_dt - timedelta(days=1)

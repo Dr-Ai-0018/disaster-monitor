@@ -55,6 +55,11 @@ class EventSummary(BaseModel):
     quality_pass: bool
     created_at: int
     updated_at: int
+    # 动态影像追踪
+    pre_window_days: Optional[int] = 7
+    post_window_days: Optional[int] = 7
+    post_imagery_open: Optional[bool] = True
+    imagery_check_count: Optional[int] = 0
 
     class Config:
         from_attributes = True
@@ -74,6 +79,10 @@ class EventDetail(EventSummary):
     quality_assessment: Optional[Any]
     quality_checked: bool
     quality_check_time: Optional[int]
+    # 动态影像追踪（详情专属）
+    pre_imagery_exhausted: Optional[bool] = False
+    pre_imagery_last_check: Optional[int] = None
+    post_imagery_last_check: Optional[int] = None
 
 
 class EventListResponse(BaseModel):
@@ -90,6 +99,7 @@ class EventStatsResponse(BaseModel):
     by_category: Dict[str, int]
     by_severity: Dict[str, int]
     recent_24h: int
+    by_imagery_status: Optional[Dict[str, int]] = None
 
 
 # ──────────────────────────────────────────

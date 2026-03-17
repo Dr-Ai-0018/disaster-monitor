@@ -212,6 +212,7 @@ _JSON_FIELD_MAP: Dict[str, tuple] = {
     "quality_max_retries":          (["quality_assessment", "max_retries"],          int),
     "sched_fetch_enabled":          (["scheduler", "fetch_rsoe_data", "enabled"],    bool),
     "sched_pool_enabled":           (["scheduler", "process_pool", "enabled"],       bool),
+    "sched_recheck_enabled":        (["scheduler", "recheck_imagery", "enabled"],    bool),
     "sched_report_enabled":         (["scheduler", "generate_daily_report", "enabled"], bool),
     "report_top_events":            (["report_generation", "top_events_count"],      int),
     "report_max_summary_len":       (["report_generation", "max_summary_length"],    int),
@@ -317,6 +318,7 @@ VALID_JOBS = {
     "process_pool",
     "generate_daily_report",
     "release_timeout_locks",
+    "recheck_imagery",
 }
 
 
@@ -346,6 +348,9 @@ def trigger_job(
             elif job_id == "generate_daily_report":
                 from core.task_scheduler import job_generate_report
                 job_generate_report()
+            elif job_id == "recheck_imagery":
+                from core.task_scheduler import job_recheck_imagery
+                job_recheck_imagery()
         finally:
             s.close()
 

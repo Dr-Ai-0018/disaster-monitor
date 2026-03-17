@@ -160,9 +160,30 @@ def job_release_locks():
         db.close()
 
 
+def job_recheck_imagery():
+    """每小时：为缺失影像的事件动态扩窗补全下载"""
+    logger.info("⏰ [定时] 开始影像动态补全检查...")
+    from core.pool_manager import PoolManager
+    from models.models import get_session_factory
+
+    SessionLocal = get_session_factory()
+    db = SessionLocal()
+    try:
+        pm = PoolManager(db)
+        post_count = pm.recheck_open_imagery(limit=20)
+        pre_count = pm.recheck_pre_imagery(limit=20)
+        if post_count or pre_count:
+            logger.info(f"影像补全: 灾后+{post_count}, 灾前+{pre_count}")
+        else:
+            logger.info("影像补全检查完成，暂无新增")
+    except Exception as e:
+        logger.error(f"影像补全检查失败: {e}")
+    finally:
+        db.close()
+
+
 def job_generate_report():
     """生成昨日灾害日报"""
-    from datetime import timedelta
     today = date.today()
     report_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
     logger.info(f"⏰ [定时] 生成日报: {report_date}")
@@ -190,14 +211,15 @@ def setup_scheduler():
     """注册所有定时任务"""
     sched_cfg = settings.SCHEDULER_CONFIG
 
-    # 每天凌晨 2:00 抓取 RSOE 数据（run_on_startup=true 时启动后立即执行一次）
+    # 每 12 小时抓取 RSOE 数据（run_on_startup=true 时启动后立即执行一次）
     fetch_cfg = sched_cfg.get("fetch_rsoe_data", {})
     if fetch_cfg.get("enabled", True):
+        interval_hours = fetch_cfg.get("interval_hours", 12)
         run_on_startup = fetch_cfg.get("run_on_startup", False)
         next_run = datetime.now(timezone.utc) if run_on_startup else None
         scheduler.add_job(
             job_fetch_rsoe,
-            CronTrigger(hour=2, minute=0),
+            IntervalTrigger(hours=interval_hours),
             id="fetch_rsoe_data",
             replace_existing=True,
             misfire_grace_time=3600,
@@ -221,6 +243,17 @@ def setup_scheduler():
             IntervalTrigger(minutes=10),
             id="release_timeout_locks",
             replace_existing=True,
+        )
+
+    # 每小时影像动态补全
+    recheck_cfg = sched_cfg.get("recheck_imagery", {})
+    if recheck_cfg.get("enabled", True):
+        scheduler.add_job(
+            job_recheck_imagery,
+            IntervalTrigger(hours=recheck_cfg.get("interval_hours", 1)),
+            id="recheck_imagery",
+            replace_existing=True,
+            misfire_grace_time=600,
         )
 
     # 每天早上 7:00 生成日报

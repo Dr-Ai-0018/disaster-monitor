@@ -38,6 +38,10 @@ def _event_to_summary(e: Event) -> EventSummary:
         quality_pass=bool(e.quality_pass),
         created_at=e.created_at,
         updated_at=e.updated_at,
+        pre_window_days=getattr(e, "pre_window_days", 7),
+        post_window_days=getattr(e, "post_window_days", 7),
+        post_imagery_open=bool(getattr(e, "post_imagery_open", 1)),
+        imagery_check_count=getattr(e, "imagery_check_count", 0) or 0,
     )
 
 
@@ -88,6 +92,13 @@ def _event_to_detail(e: Event) -> EventDetail:
         quality_pass=bool(e.quality_pass),
         created_at=e.created_at,
         updated_at=e.updated_at,
+        pre_window_days=getattr(e, "pre_window_days", 7),
+        post_window_days=getattr(e, "post_window_days", 7),
+        post_imagery_open=bool(getattr(e, "post_imagery_open", 1)),
+        imagery_check_count=getattr(e, "imagery_check_count", 0) or 0,
+        pre_imagery_exhausted=bool(getattr(e, "pre_imagery_exhausted", 0)),
+        pre_imagery_last_check=getattr(e, "pre_imagery_last_check", None),
+        post_imagery_last_check=getattr(e, "post_imagery_last_check", None),
     )
 
 
@@ -101,6 +112,7 @@ def list_events(
     severity: Optional[str] = None,
     start_date: Optional[int] = None,
     end_date: Optional[int] = None,
+    imagery_open: Optional[bool] = None,
     db: Session = Depends(get_db),
     _: AdminUser = Depends(get_current_admin),
 ):
@@ -117,6 +129,8 @@ def list_events(
         q = q.filter(Event.event_date >= start_date)
     if end_date:
         q = q.filter(Event.event_date <= end_date)
+    if imagery_open is not None:
+        q = q.filter(Event.post_imagery_open == (1 if imagery_open else 0))
 
     total = q.count()
     events = q.order_by(Event.event_date.desc()).offset((page - 1) * limit).limit(limit).all()
@@ -146,6 +160,11 @@ def get_stats(
     by_severity: dict = {}
     recent_24h = 0
 
+    both_ready = 0
+    post_pending = 0
+    pre_only = 0
+    exhausted = 0
+
     for e in all_events:
         by_status[e.status] = by_status.get(e.status, 0) + 1
         if e.category:
@@ -155,12 +174,30 @@ def get_stats(
         if e.created_at and (now_ms - e.created_at) <= day_ms:
             recent_24h += 1
 
+        pre_ok = bool(e.pre_image_downloaded)
+        post_ok = bool(e.post_image_downloaded)
+        if pre_ok and post_ok:
+            both_ready += 1
+        elif pre_ok and not post_ok and getattr(e, "post_imagery_open", 1):
+            post_pending += 1
+        elif pre_ok and not post_ok:
+            pre_only += 1
+        elif not pre_ok and getattr(e, "pre_imagery_exhausted", 0) and \
+                not getattr(e, "post_imagery_open", 1):
+            exhausted += 1
+
     return EventStatsResponse(
         total_events=len(all_events),
         by_status=by_status,
         by_category=by_category,
         by_severity=by_severity,
         recent_24h=recent_24h,
+        by_imagery_status={
+            "both_ready": both_ready,
+            "post_pending": post_pending,
+            "pre_only": pre_only,
+            "exhausted": exhausted,
+        },
     )
 
 

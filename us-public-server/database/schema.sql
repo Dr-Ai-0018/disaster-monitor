@@ -36,6 +36,14 @@ CREATE TABLE IF NOT EXISTS events (
     quality_checked INTEGER DEFAULT 0,
     quality_pass INTEGER DEFAULT 0,
     quality_check_time INTEGER,
+    -- 动态影像追踪字段
+    pre_window_days INTEGER DEFAULT 7,
+    pre_imagery_last_check INTEGER,
+    pre_imagery_exhausted INTEGER DEFAULT 0,
+    post_window_days INTEGER DEFAULT 7,
+    post_imagery_last_check INTEGER,
+    post_imagery_open INTEGER DEFAULT 1,
+    imagery_check_count INTEGER DEFAULT 0,
     UNIQUE(event_id, sub_id)
 );
 
@@ -46,6 +54,8 @@ CREATE INDEX IF NOT EXISTS idx_events_quality_pass ON events(quality_pass);
 CREATE INDEX IF NOT EXISTS idx_events_country ON events(country);
 CREATE INDEX IF NOT EXISTS idx_events_severity ON events(severity);
 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
+CREATE INDEX IF NOT EXISTS idx_events_post_imagery_open ON events(post_imagery_open);
+CREATE INDEX IF NOT EXISTS idx_events_post_imagery_check ON events(post_imagery_last_check);
 
 -- 2. GEE 影像下载任务表
 CREATE TABLE IF NOT EXISTS gee_tasks (
