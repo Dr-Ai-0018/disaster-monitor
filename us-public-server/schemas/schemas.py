@@ -288,6 +288,7 @@ class CreateTokenResponse(BaseModel):
 
 
 class TokenListItem(BaseModel):
+    token_ref: str
     token: str
     name: str
     description: Optional[str]

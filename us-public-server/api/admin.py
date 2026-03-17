@@ -3,9 +3,10 @@
 """
 import json
 import secrets
+from hashlib import sha256
 from datetime import datetime, timezone
 from typing import Any, Dict, List
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy.orm import Session
 
 from models.models import AdminUser, ApiToken, Event, TaskQueue, Product, DailyReport, get_db
@@ -121,6 +122,7 @@ def list_tokens(
     tokens = db.query(ApiToken).order_by(ApiToken.created_at.desc()).all()
     return [
         TokenListItem(
+            token_ref=sha256(t.token.encode("utf-8")).hexdigest()[:16],
             token=t.token[:8] + "..." + t.token[-4:],  # 脱敏显示
             name=t.name,
             description=t.description,
@@ -139,11 +141,18 @@ def create_token(
     db: Session = Depends(get_db),
     current_user: AdminUser = Depends(get_current_admin),
 ):
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Token 名称不能为空")
+    existing = db.query(ApiToken).filter(ApiToken.name == name).first()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Token 名称 '{name}' 已存在")
+
     token_str = secrets.token_urlsafe(32)
     now = _now_ms()
     token = ApiToken(
         token=token_str,
-        name=req.name,
+        name=name,
         description=req.description,
         scopes=json.dumps(req.scopes),
         is_active=1,
@@ -152,18 +161,24 @@ def create_token(
     )
     db.add(token)
     db.commit()
-    return CreateTokenResponse(token=token_str, name=req.name, created_at=now)
+    return CreateTokenResponse(token=token_str, name=name, created_at=now)
 
 
 @router.delete("/tokens/{token_name}", response_model=MessageResponse)
 def disable_token(
     token_name: str,
+    created_at: int = Query(..., description="Token 创建时间，用于精确定位记录"),
     db: Session = Depends(get_db),
     _: AdminUser = Depends(get_current_admin),
 ):
-    token = db.query(ApiToken).filter(ApiToken.name == token_name).first()
+    token = db.query(ApiToken).filter(
+        ApiToken.name == token_name,
+        ApiToken.created_at == created_at,
+    ).first()
     if not token:
         raise HTTPException(status_code=404, detail="Token 不存在")
+    if not token.is_active:
+        return MessageResponse(message=f"Token '{token_name}' 已禁用")
     token.is_active = 0
     db.commit()
     return MessageResponse(message=f"Token '{token_name}' 已禁用")

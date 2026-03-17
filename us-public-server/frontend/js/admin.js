@@ -17,9 +17,52 @@ let AUTH_TOKEN = localStorage.getItem('admin_token') || '';
 let _eventsPage = 1;
 let _rawPoolPage = 1;
 let _trackPage = 1;
+let _productsPage = 1;
+let _reportsPage = 1;
+
+const STATUS_LABELS = {
+    pending: '待处理',
+    pool: '事件池',
+    checked: '已质检',
+    queued: '已入队',
+    processing: '处理中',
+    completed: '已完成',
+    failed: '失败'
+};
+
+const SEVERITY_LABELS = {
+    extreme: '极高',
+    high: '高',
+    medium: '中',
+    low: '低'
+};
+
+const TOAST_TYPE_LABELS = {
+    success: '成功',
+    error: '错误',
+    info: '提示'
+};
+
+const JOB_LABELS = {
+    fetch_rsoe_data: '抓取 RSOE 数据',
+    process_pool: '处理事件池',
+    release_timeout_locks: '释放超时锁',
+    recheck_imagery: '重新检查影像'
+};
+
+const VIEW_LABELS = {
+    dashboard: '系统概览',
+    pool: '事件池',
+    events: '事件管理',
+    products: '成品池',
+    reports: '灾害日报',
+    tokens: 'API 令牌',
+    settings: '系统配置'
+};
 
 // ==================== 初始化 ====================
 document.addEventListener('DOMContentLoaded', () => {
+    initDefaultDates();
     if (AUTH_TOKEN) {
         checkAuth();
     } else {
@@ -31,6 +74,11 @@ document.addEventListener('DOMContentLoaded', () => {
 function initEventListeners() {
     document.getElementById('login-form').addEventListener('submit', handleLogin);
     document.getElementById('logout-btn').addEventListener('click', handleLogout);
+    document.getElementById('sidebar-toggle-btn')?.addEventListener('click', openSidebar);
+    document.getElementById('sidebar-close-btn')?.addEventListener('click', closeSidebar);
+    document.getElementById('sidebar-backdrop')?.addEventListener('click', closeSidebar);
+    window.addEventListener('resize', handleViewportChange);
+    document.addEventListener('keydown', handleGlobalKeydown);
 
     document.querySelectorAll('.nav-item').forEach(item => {
         item.addEventListener('click', (e) => {
@@ -39,6 +87,20 @@ function initEventListeners() {
             switchView(view);
         });
     });
+}
+
+function initDefaultDates() {
+    const reportDateInput = document.getElementById('report-generate-date');
+    if (reportDateInput && !reportDateInput.value) {
+        const date = new Date();
+        date.setDate(date.getDate() - 1);
+        reportDateInput.value = formatDateInput(date);
+    }
+    const dateLabel = document.getElementById('topbar-date');
+    if (dateLabel) {
+        const now = new Date();
+        dateLabel.textContent = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    }
 }
 
 // ==================== 认证逻辑 ====================
@@ -63,10 +125,10 @@ async function handleLogin(e) {
 
         showAdminPanel();
         loadDashboard();
-        showToast('Login successful', 'success');
+        showToast('登录成功', 'success');
     } catch (error) {
         console.error('Login failed:', error);
-        showToast('Authentication failed. Check credentials.', 'error');
+        showToast('登录失败，请检查用户名和密码', 'error');
     } finally {
         showLoading(false);
     }
@@ -92,17 +154,21 @@ function handleLogout() {
     localStorage.removeItem('admin_token');
     AUTH_TOKEN = '';
     showLoginPage();
-    showToast('Logged out successfully', 'info');
+    showToast('已退出登录', 'info');
 }
 
 function showLoginPage() {
     document.getElementById('login-page').classList.remove('hidden');
     document.getElementById('admin-panel').classList.add('hidden');
+    document.body.classList.remove('sidebar-open');
 }
 
 function showAdminPanel() {
     document.getElementById('login-page').classList.add('hidden');
     document.getElementById('admin-panel').classList.remove('hidden');
+    document.getElementById('admin-panel').classList.add('flex');
+    updateViewTitle('dashboard');
+    handleViewportChange();
 }
 
 // ==================== 视图切换 ====================
@@ -119,6 +185,8 @@ function switchView(view) {
 
     document.querySelectorAll('[id^="view-"]').forEach(el => el.classList.add('hidden'));
     document.getElementById(`view-${view}`).classList.remove('hidden');
+    updateViewTitle(view);
+    if (window.innerWidth < 1024) closeSidebar();
 
     switch(view) {
         case 'dashboard': loadDashboard(); break;
@@ -128,6 +196,52 @@ function switchView(view) {
         case 'reports': loadReports(); break;
         case 'tokens': loadTokens(); break;
         case 'settings': loadSettings(); break;
+    }
+}
+
+function openSidebar() {
+    const sidebar = document.getElementById('admin-sidebar');
+    const backdrop = document.getElementById('sidebar-backdrop');
+    if (!sidebar || window.innerWidth >= 1024) return;
+    sidebar.classList.remove('-translate-x-full');
+    backdrop?.classList.remove('hidden');
+    document.body.classList.add('sidebar-open');
+}
+
+function closeSidebar() {
+    const sidebar = document.getElementById('admin-sidebar');
+    const backdrop = document.getElementById('sidebar-backdrop');
+    if (!sidebar || window.innerWidth >= 1024) return;
+    sidebar.classList.add('-translate-x-full');
+    backdrop?.classList.add('hidden');
+    document.body.classList.remove('sidebar-open');
+}
+
+function handleViewportChange() {
+    const sidebar = document.getElementById('admin-sidebar');
+    const backdrop = document.getElementById('sidebar-backdrop');
+    if (!sidebar) return;
+    if (window.innerWidth >= 1024) {
+        sidebar.classList.remove('-translate-x-full');
+        backdrop?.classList.add('hidden');
+        document.body.classList.remove('sidebar-open');
+    } else {
+        sidebar.classList.add('-translate-x-full');
+    }
+}
+
+function updateViewTitle(view) {
+    const label = VIEW_LABELS[view] || '管理后台';
+    const topbarTitle = document.getElementById('topbar-title');
+    const sidebarTitle = document.getElementById('sidebar-current-view');
+    if (topbarTitle) topbarTitle.textContent = label;
+    if (sidebarTitle) sidebarTitle.textContent = label;
+}
+
+function handleGlobalKeydown(event) {
+    if (event.key === 'Escape') {
+        document.getElementById('detail-modal')?.remove();
+        closeSidebar();
     }
 }
 
@@ -150,36 +264,36 @@ async function loadDashboard() {
         const statsHtml = `
             <div class="tech-card p-5">
                 <div class="flex justify-between items-start mb-4">
-                    <span class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold">Total Events</span>
+                    <span class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold">事件总数</span>
                     <i data-lucide="database" class="w-4 h-4 text-black opacity-80"></i>
                 </div>
                 <div class="text-3xl font-mono font-light tracking-tighter">${data.database?.events_count || 0}</div>
             </div>
             <div class="tech-card p-5">
                 <div class="flex justify-between items-start mb-4">
-                    <span class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold">Pending Tasks</span>
+                    <span class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold">待处理任务</span>
                     <i data-lucide="clock" class="w-4 h-4 text-black opacity-80"></i>
                 </div>
                 <div class="text-3xl font-mono font-light tracking-tighter">${data.database?.tasks_pending || 0}</div>
             </div>
             <div class="tech-card p-5">
                 <div class="flex justify-between items-start mb-4">
-                    <span class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold">Tracking</span>
+                    <span class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold">影像追踪中</span>
                     <i data-lucide="satellite-dish" class="w-4 h-4 text-black opacity-80"></i>
                 </div>
                 <div class="text-3xl font-mono font-light tracking-tighter">${trackingCount}</div>
-                <div class="font-mono text-[10px] text-gray-400 mt-1">post-imagery pending</div>
+                <div class="font-mono text-[10px] text-gray-400 mt-1">灾后影像待获取</div>
             </div>
             <div class="tech-card p-5">
                 <div class="flex justify-between items-start mb-4">
-                    <span class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold">Products</span>
+                    <span class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold">成品数量</span>
                     <i data-lucide="package" class="w-4 h-4 text-black opacity-80"></i>
                 </div>
                 <div class="text-3xl font-mono font-light tracking-tighter">${data.database?.products_count || 0}</div>
             </div>
             <div class="tech-card p-5">
                 <div class="flex justify-between items-start mb-4">
-                    <span class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold">DB Size</span>
+                    <span class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold">数据库大小</span>
                     <i data-lucide="hard-drive" class="w-4 h-4 text-black opacity-80"></i>
                 </div>
                 <div class="text-3xl font-mono font-light tracking-tighter">${data.database?.size_mb || 0}<span class="text-sm text-gray-400">MB</span></div>
@@ -189,28 +303,56 @@ async function loadDashboard() {
 
         const statusHtml = `
             <div class="flex justify-between py-3 border-b border-gray-100">
-                <span class="font-mono text-xs uppercase tracking-wider text-gray-500">GEE Status</span>
-                <span class="font-mono text-xs font-bold ${data.gee?.authenticated ? 'text-green-600' : 'text-red-600'}">${data.gee?.authenticated ? 'CONNECTED' : 'OFFLINE'}</span>
+                <span class="font-mono text-xs uppercase tracking-wider text-gray-500">运行环境</span>
+                <span class="font-mono text-xs font-bold">${escapeHtml(data.system?.env || '暂无')}</span>
             </div>
             <div class="flex justify-between py-3 border-b border-gray-100">
-                <span class="font-mono text-xs uppercase tracking-wider text-gray-500">Scheduler</span>
-                <span class="font-mono text-xs font-bold ${data.scheduler?.running ? 'text-green-600' : 'text-red-600'}">${data.scheduler?.running ? 'RUNNING' : 'STOPPED'}</span>
+                <span class="font-mono text-xs uppercase tracking-wider text-gray-500">系统版本</span>
+                <span class="font-mono text-xs font-bold">${escapeHtml(data.system?.version || '暂无')}</span>
             </div>
             <div class="flex justify-between py-3 border-b border-gray-100">
-                <span class="font-mono text-xs uppercase tracking-wider text-gray-500">Locked Tasks</span>
+                <span class="font-mono text-xs uppercase tracking-wider text-gray-500">GEE 状态</span>
+                <span class="font-mono text-xs font-bold ${data.gee?.authenticated ? 'text-green-600' : 'text-red-600'}">${data.gee?.authenticated ? '已连接' : '离线'}</span>
+            </div>
+            <div class="flex justify-between py-3 border-b border-gray-100">
+                <span class="font-mono text-xs uppercase tracking-wider text-gray-500">GEE 运行任务</span>
+                <span class="font-mono text-xs font-bold">${data.gee?.running_tasks ?? 0}</span>
+            </div>
+            <div class="flex justify-between py-3 border-b border-gray-100">
+                <span class="font-mono text-xs uppercase tracking-wider text-gray-500">配额告警</span>
+                <span class="font-mono text-xs font-bold ${data.gee?.quota_warning ? 'text-orange-600' : 'text-green-600'}">${data.gee?.quota_warning ? '有告警' : '正常'}</span>
+            </div>
+            <div class="flex justify-between py-3 border-b border-gray-100">
+                <span class="font-mono text-xs uppercase tracking-wider text-gray-500">调度器</span>
+                <span class="font-mono text-xs font-bold ${data.scheduler?.running ? 'text-green-600' : 'text-red-600'}">${data.scheduler?.running ? '运行中' : '已停止'}</span>
+            </div>
+            <div class="flex justify-between py-3 border-b border-gray-100">
+                <span class="font-mono text-xs uppercase tracking-wider text-gray-500">锁定任务</span>
                 <span class="font-mono text-xs font-bold">${data.database?.tasks_locked || 0}</span>
             </div>
             <div class="flex justify-between py-3">
-                <span class="font-mono text-xs uppercase tracking-wider text-gray-500">System</span>
-                <span class="font-mono text-xs font-bold text-green-600">HEALTHY</span>
+                <span class="font-mono text-xs uppercase tracking-wider text-gray-500">系统</span>
+                <span class="font-mono text-xs font-bold text-green-600">健康</span>
             </div>
+            ${(data.scheduler?.next_jobs?.length ?? 0) > 0 ? `
+            <div class="border-t border-gray-100 pt-4">
+                <div class="font-mono text-[10px] text-gray-500 uppercase tracking-widest mb-2">下一批调度任务</div>
+                <div class="space-y-2">
+                    ${data.scheduler.next_jobs.slice(0, 4).map(job => `
+                        <div class="flex justify-between gap-3 font-mono text-[10px]">
+                            <span class="text-gray-500">${escapeHtml(job.job_id)}</span>
+                            <span class="text-black">${formatDateTime(job.next_run)}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>` : ''}
         `;
         document.getElementById('system-status').innerHTML = statusHtml;
 
         lucide.createIcons();
     } catch (error) {
         console.error('Dashboard load failed:', error);
-        showToast('Failed to load dashboard data', 'error');
+        showToast('加载系统概览失败', 'error');
     } finally {
         showLoading(false);
     }
@@ -235,26 +377,27 @@ async function loadPoolStats() {
 
         document.getElementById('pool-stats-row').innerHTML = `
             <div class="tech-card p-5">
-                <div class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold mb-3">Raw Pool Total</div>
+                <div class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold mb-3">原始池总量</div>
                 <div class="text-3xl font-mono font-light tracking-tighter">${ps.total_events ?? '—'}</div>
-                <div class="font-mono text-[10px] text-gray-400 mt-1">active: ${ps.active_events ?? '—'}</div>
+                <div class="font-mono text-[10px] text-gray-400 mt-1">活跃: ${ps.active_events ?? '—'}</div>
             </div>
             <div class="tech-card p-5">
-                <div class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold mb-3">Processing</div>
+                <div class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold mb-3">处理中</div>
                 <div class="text-3xl font-mono font-light tracking-tighter">${(evByStatus.pending||0) + (evByStatus.pool||0)}</div>
-                <div class="font-mono text-[10px] text-gray-400 mt-1">pending+pool</div>
+                <div class="font-mono text-[10px] text-gray-400 mt-1">待处理 + 事件池</div>
             </div>
             <div class="tech-card p-5">
-                <div class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold mb-3">Imagery Tracking</div>
+                <div class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold mb-3">影像追踪</div>
                 <div class="text-3xl font-mono font-light tracking-tighter">${imgStatus.post_pending ?? '—'}</div>
-                <div class="font-mono text-[10px] text-gray-400 mt-1">post-imagery open</div>
+                <div class="font-mono text-[10px] text-gray-400 mt-1">灾后影像待追踪</div>
             </div>
             <div class="tech-card p-5">
-                <div class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold mb-3">Both Ready</div>
+                <div class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold mb-3">双影像就绪</div>
                 <div class="text-3xl font-mono font-light tracking-tighter">${imgStatus.both_ready ?? '—'}</div>
-                <div class="font-mono text-[10px] text-gray-400 mt-1">pre+post downloaded</div>
+                <div class="font-mono text-[10px] text-gray-400 mt-1">灾前 + 灾后已下载</div>
             </div>
         `;
+        syncCategoryOptions('pool-filter-category', ps.by_category || {});
         lucide.createIcons();
     } catch(e) {
         console.error('Pool stats failed:', e);
@@ -303,18 +446,62 @@ async function loadRawPool(page = 1) {
             <tr class="border-b border-gray-100 hover:bg-gray-50">
                 <td class="py-3 px-4 text-gray-500">${ev.event_id}-${ev.sub_id}</td>
                 <td class="py-3 px-4 font-semibold max-w-xs truncate" title="${escapeHtml(ev.title)}">${escapeHtml(ev.title)}</td>
-                <td class="py-3 px-4 text-gray-600">${escapeHtml(ev.category_name || ev.category || 'N/A')}</td>
-                <td class="py-3 px-4 text-gray-600 uppercase">${escapeHtml(ev.country || 'N/A')}</td>
-                <td class="py-3 px-4"><span class="px-2 py-0.5 ${getSeverityClass(ev.severity)} text-[10px] font-bold uppercase">${ev.severity || 'N/A'}</span></td>
+                <td class="py-3 px-4 text-gray-600">${escapeHtml(ev.category_name || ev.category || '暂无')}</td>
+                <td class="py-3 px-4 text-gray-600 uppercase">${escapeHtml(ev.country || '暂无')}</td>
+                <td class="py-3 px-4"><span class="px-2 py-0.5 ${getSeverityClass(ev.severity)} text-[10px] font-bold uppercase">${labelSeverity(ev.severity)}</span></td>
                 <td class="py-3 px-4 text-gray-500">${formatDate(ev.last_seen)}</td>
                 <td class="py-3 px-4 text-gray-600">${ev.fetch_count}</td>
+                <td class="py-3 px-4 text-right">
+                    <button onclick="window.showPoolEventDetail(${ev.event_id}, ${ev.sub_id ?? 0})" class="px-2 py-1 border border-gray-200 hover:border-black font-mono text-[10px] font-bold uppercase">详情</button>
+                </td>
             </tr>
-        `).join('') || '<tr><td colspan="7" class="py-12 text-center text-gray-400 font-mono text-xs uppercase">NO_DATA</td></tr>';
+        `).join('') || '<tr><td colspan="8" class="py-12 text-center text-gray-400 font-mono text-xs uppercase">暂无数据</td></tr>';
 
         renderPagination('raw-pool-pagination', data.page, data.pages, loadRawPool);
     } catch(e) {
         console.error('Raw pool failed:', e);
-        showToast('Failed to load raw pool', 'error');
+        showToast('加载原始事件池失败', 'error');
+    }
+}
+
+async function showPoolEventDetail(eventId, subId = 0) {
+    showLoading(true);
+    try {
+        const response = await authFetch(`${POOL_API}/${eventId}/${subId}`);
+        if (!response.ok) throw new Error(`HTTP_${response.status}`);
+        const ev = await response.json();
+        const content = `
+            <div class="space-y-4 font-mono text-xs">
+                <div class="grid grid-cols-2 gap-3">
+                    <div><span class="text-gray-500 uppercase">事件 ID</span><div class="font-bold mt-1">${ev.event_id}-${ev.sub_id}</div></div>
+                    <div><span class="text-gray-500 uppercase">状态</span><div class="font-bold mt-1">${ev.is_active ? '活跃' : '已失活'}</div></div>
+                    <div><span class="text-gray-500 uppercase">类别</span><div class="font-bold mt-1">${escapeHtml(ev.category_name || ev.category || '暂无')}</div></div>
+                    <div><span class="text-gray-500 uppercase">严重程度</span><div class="font-bold mt-1 ${getSeverityClass(ev.severity)} px-2 py-0.5 inline-block uppercase text-[10px]">${labelSeverity(ev.severity)}</div></div>
+                    <div><span class="text-gray-500 uppercase">国家</span><div class="font-bold mt-1">${escapeHtml(ev.country || '暂无')}</div></div>
+                    <div><span class="text-gray-500 uppercase">坐标</span><div class="font-bold mt-1">${ev.longitude?.toFixed(4) ?? '—'}, ${ev.latitude?.toFixed(4) ?? '—'}</div></div>
+                    <div><span class="text-gray-500 uppercase">首次发现</span><div class="font-bold mt-1">${formatDateTime(ev.first_seen)}</div></div>
+                    <div><span class="text-gray-500 uppercase">最后出现</span><div class="font-bold mt-1">${formatDateTime(ev.last_seen)}</div></div>
+                </div>
+                <div class="border-t border-gray-100 pt-4">
+                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">标题</div>
+                    <div class="leading-6">${escapeHtml(ev.title || '暂无')}</div>
+                </div>
+                <div class="border-t border-gray-100 pt-4">
+                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">附加信息</div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><span class="text-gray-500 uppercase">地址</span><div class="font-bold mt-1">${escapeHtml(ev.address || '暂无')}</div></div>
+                        <div><span class="text-gray-500 uppercase">抓取次数</span><div class="font-bold mt-1">${ev.fetch_count ?? 0}</div></div>
+                        <div><span class="text-gray-500 uppercase">事件日期</span><div class="font-bold mt-1">${formatDateTime(ev.event_date)}</div></div>
+                        <div><span class="text-gray-500 uppercase">最后更新</span><div class="font-bold mt-1">${formatDateTime(ev.last_update)}</div></div>
+                    </div>
+                </div>
+            </div>
+        `;
+        showModal(`事件池详情 ${ev.event_id}-${ev.sub_id}`, content);
+    } catch (error) {
+        showToast('加载事件池详情失败', 'error');
+    } finally {
+        showLoading(false);
     }
 }
 
@@ -338,20 +525,20 @@ async function loadTrack(page = 1) {
         document.getElementById('track-tbody').innerHTML = events.map(ev => `
             <tr class="border-b border-gray-100 hover:bg-gray-50">
                 <td class="py-3 px-4 font-semibold max-w-xs truncate" title="${escapeHtml(ev.title)}">${escapeHtml(ev.title)}</td>
-                <td class="py-3 px-4 text-gray-600 uppercase">${escapeHtml(ev.country || 'N/A')}</td>
-                <td class="py-3 px-4"><span class="px-2 py-0.5 bg-gray-100 text-gray-700 text-[10px] font-bold uppercase">${ev.status}</span></td>
+                <td class="py-3 px-4 text-gray-600 uppercase">${escapeHtml(ev.country || '暂无')}</td>
+                <td class="py-3 px-4"><span class="px-2 py-0.5 bg-gray-100 text-gray-700 text-[10px] font-bold uppercase">${labelStatus(ev.status)}</span></td>
                 <td class="py-3 px-4">${formatImageryStatus(ev)}</td>
                 <td class="py-3 px-4 text-gray-500">${ev.imagery_check_count ?? 0}</td>
                 <td class="py-3 px-4 text-right">
-                    <button onclick="window.processEvent('${ev.uuid}')" class="px-2 py-1 border border-gray-300 hover:border-black hover:bg-black hover:text-white transition-colors font-mono text-[10px] font-bold uppercase">PROCESS</button>
+                    ${renderProcessButton(ev)}
                 </td>
             </tr>
-        `).join('') || '<tr><td colspan="6" class="py-12 text-center text-gray-400 font-mono text-xs uppercase">NO_DATA</td></tr>';
+        `).join('') || '<tr><td colspan="6" class="py-12 text-center text-gray-400 font-mono text-xs uppercase">暂无数据</td></tr>';
 
         renderPagination('track-pagination', data.page, data.pages, loadTrack);
     } catch(e) {
         console.error('Track load failed:', e);
-        showToast('Failed to load processing track', 'error');
+        showToast('加载处理追踪失败', 'error');
     }
 }
 
@@ -372,33 +559,39 @@ async function loadEvents(page = 1) {
     if (imageryOpen) url += `&imagery_open=true`;
 
     try {
-        const response = await authFetch(url);
+        const [response, statsResponse] = await Promise.all([
+            authFetch(url),
+            authFetch(`${EVENTS_API}/stats`)
+        ]);
         if (!response.ok) throw new Error(`HTTP_${response.status}`);
 
         const data = await response.json();
+        const stats = statsResponse.ok ? await statsResponse.json() : null;
         const events = data.data || [];
+
+        renderEventStatsRow(stats);
 
         const tbody = document.getElementById('events-tbody');
         tbody.innerHTML = events.map(event => `
             <tr class="border-b border-gray-100 hover:bg-gray-50">
                 <td class="py-3 px-4 font-semibold max-w-xs truncate" title="${escapeHtml(event.title)}">${escapeHtml(event.title)}</td>
-                <td class="py-3 px-4 text-gray-600 uppercase">${escapeHtml(event.country || 'N/A')}</td>
-                <td class="py-3 px-4"><span class="px-2 py-0.5 bg-gray-100 text-gray-700 text-[10px] font-bold uppercase">${event.status}</span></td>
-                <td class="py-3 px-4"><span class="px-2 py-0.5 ${getSeverityClass(event.severity)} text-[10px] font-bold uppercase">${event.severity || 'N/A'}</span></td>
+                <td class="py-3 px-4 text-gray-600 uppercase">${escapeHtml(event.country || '暂无')}</td>
+                <td class="py-3 px-4"><span class="px-2 py-0.5 bg-gray-100 text-gray-700 text-[10px] font-bold uppercase">${labelStatus(event.status)}</span></td>
+                <td class="py-3 px-4"><span class="px-2 py-0.5 ${getSeverityClass(event.severity)} text-[10px] font-bold uppercase">${labelSeverity(event.severity)}</span></td>
                 <td class="py-3 px-4">${formatImageryStatus(event)}</td>
                 <td class="py-3 px-4 text-gray-500">${event.imagery_check_count ?? 0}</td>
                 <td class="py-3 px-4 text-right">
-                    <button onclick="window.showEventDetail('${event.uuid}')" class="px-2 py-1 border border-gray-200 hover:border-black font-mono text-[10px] font-bold uppercase mr-1">DETAIL</button>
-                    <button onclick="window.processEvent('${event.uuid}')" class="px-2 py-1 border border-gray-300 hover:border-black hover:bg-black hover:text-white transition-colors font-mono text-[10px] font-bold uppercase">PROCESS</button>
+                    <button onclick="window.showEventDetail('${event.uuid}')" class="px-2 py-1 border border-gray-200 hover:border-black font-mono text-[10px] font-bold uppercase mr-1">详情</button>
+                    ${renderProcessButton(event)}
                 </td>
             </tr>
-        `).join('') || '<tr><td colspan="7" class="py-12 text-center text-gray-400 font-mono text-xs uppercase">NO_EVENTS</td></tr>';
+        `).join('') || '<tr><td colspan="7" class="py-12 text-center text-gray-400 font-mono text-xs uppercase">暂无事件</td></tr>';
 
         renderPagination('events-pagination', data.page, data.pages, loadEvents);
         lucide.createIcons();
     } catch (error) {
         console.error('Events load failed:', error);
-        showToast('Failed to load events', 'error');
+        showToast('加载事件列表失败', 'error');
     } finally {
         showLoading(false);
     }
@@ -412,47 +605,78 @@ async function showEventDetail(uuid) {
         const ev = await resp.json();
 
         const preStatus = ev.pre_image_downloaded
-            ? `<span class="text-green-600 font-bold">✓ Downloaded</span> (${ev.pre_image_source || 'N/A'}, ${ev.pre_window_days}d window)`
+            ? `<span class="text-green-600 font-bold">✓ 已下载</span> (${ev.pre_image_source || '暂无'}, ${ev.pre_window_days} 天窗口)`
             : ev.pre_imagery_exhausted
-                ? `<span class="text-red-600 font-bold">✗ Exhausted</span> (max window reached)`
-                : `<span class="text-yellow-600 font-bold">⏳ Searching</span> (${ev.pre_window_days}d window)`;
+                ? `<span class="text-red-600 font-bold">✗ 已穷尽</span> (已达到最大窗口)`
+                : `<span class="text-yellow-600 font-bold">⏳ 搜索中</span> (${ev.pre_window_days} 天窗口)`;
 
         const postStatus = ev.post_image_downloaded
-            ? `<span class="text-green-600 font-bold">✓ Downloaded</span> (${ev.post_image_source || 'N/A'}, ${ev.post_window_days}d window)`
+            ? `<span class="text-green-600 font-bold">✓ 已下载</span> (${ev.post_image_source || '暂无'}, ${ev.post_window_days} 天窗口)`
             : ev.post_imagery_open === false
-                ? `<span class="text-red-600 font-bold">✗ Stopped</span> (max window reached)`
-                : `<span class="text-yellow-600 font-bold">⏳ Tracking</span> (${ev.post_window_days}d window, checked ${ev.imagery_check_count ?? 0}x${ev.post_imagery_last_check ? ', last: ' + formatDate(ev.post_imagery_last_check) : ''})`;
+                ? `<span class="text-red-600 font-bold">✗ 已停止</span> (已达到最大窗口)`
+                : `<span class="text-yellow-600 font-bold">⏳ 追踪中</span> (${ev.post_window_days} 天窗口，已检查 ${ev.imagery_check_count ?? 0} 次${ev.post_imagery_last_check ? '，最近: ' + formatDate(ev.post_imagery_last_check) : ''})`;
 
         const content = `
             <div class="space-y-4 font-mono text-xs">
                 <div class="grid grid-cols-2 gap-3">
-                    <div><span class="text-gray-500 uppercase">Status</span><div class="font-bold mt-1">${ev.status}</div></div>
-                    <div><span class="text-gray-500 uppercase">Severity</span><div class="font-bold mt-1 ${getSeverityClass(ev.severity)} px-2 py-0.5 inline-block uppercase text-[10px]">${ev.severity || 'N/A'}</div></div>
-                    <div><span class="text-gray-500 uppercase">Country</span><div class="font-bold mt-1 uppercase">${ev.country || 'N/A'}</div></div>
-                    <div><span class="text-gray-500 uppercase">Category</span><div class="font-bold mt-1">${ev.category_name || ev.category || 'N/A'}</div></div>
-                    <div><span class="text-gray-500 uppercase">Coordinates</span><div class="font-bold mt-1">${ev.longitude?.toFixed(4) ?? '—'}, ${ev.latitude?.toFixed(4) ?? '—'}</div></div>
-                    <div><span class="text-gray-500 uppercase">Event Date</span><div class="font-bold mt-1">${formatDate(ev.event_date)}</div></div>
+                    <div><span class="text-gray-500 uppercase">状态</span><div class="font-bold mt-1">${labelStatus(ev.status)}</div></div>
+                    <div><span class="text-gray-500 uppercase">严重程度</span><div class="font-bold mt-1 ${getSeverityClass(ev.severity)} px-2 py-0.5 inline-block uppercase text-[10px]">${labelSeverity(ev.severity)}</div></div>
+                    <div><span class="text-gray-500 uppercase">国家</span><div class="font-bold mt-1 uppercase">${ev.country || '暂无'}</div></div>
+                    <div><span class="text-gray-500 uppercase">类别</span><div class="font-bold mt-1">${ev.category_name || ev.category || '暂无'}</div></div>
+                    <div><span class="text-gray-500 uppercase">坐标</span><div class="font-bold mt-1">${ev.longitude?.toFixed(4) ?? '—'}, ${ev.latitude?.toFixed(4) ?? '—'}</div></div>
+                    <div><span class="text-gray-500 uppercase">事件日期</span><div class="font-bold mt-1">${formatDate(ev.event_date)}</div></div>
+                    <div><span class="text-gray-500 uppercase">地址</span><div class="font-bold mt-1">${escapeHtml(ev.address || '暂无')}</div></div>
+                    <div><span class="text-gray-500 uppercase">最近更新</span><div class="font-bold mt-1">${formatDateTime(ev.last_update)}</div></div>
                 </div>
                 <div class="border-t border-gray-100 pt-4">
-                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">Imagery Tracking</div>
+                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">影像追踪</div>
                     <div class="space-y-2">
-                        <div class="flex gap-3 items-start"><span class="text-gray-500 w-14 shrink-0">Pre:</span><span>${preStatus}</span></div>
-                        <div class="flex gap-3 items-start"><span class="text-gray-500 w-14 shrink-0">Post:</span><span>${postStatus}</span></div>
+                        <div class="flex gap-3 items-start"><span class="text-gray-500 w-14 shrink-0">灾前:</span><span>${preStatus}</span></div>
+                        <div class="flex gap-3 items-start"><span class="text-gray-500 w-14 shrink-0">灾后:</span><span>${postStatus}</span></div>
                     </div>
                 </div>
                 ${ev.quality_checked ? `
                 <div class="border-t border-gray-100 pt-4">
-                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">Quality Assessment</div>
-                    <div>Score: <span class="font-bold">${ev.quality_score ?? 'N/A'}</span> — <span class="font-bold ${ev.quality_pass ? 'text-green-600' : 'text-red-600'}">${ev.quality_pass ? 'PASS' : 'FAIL'}</span></div>
+                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">质量评估</div>
+                    <div>得分: <span class="font-bold">${ev.quality_score ?? '暂无'}</span> / 结果: <span class="font-bold ${ev.quality_pass ? 'text-green-600' : 'text-red-600'}">${ev.quality_pass ? '通过' : '未通过'}</span></div>
+                </div>` : ''}
+                ${ev.source_url ? `
+                <div class="border-t border-gray-100 pt-4">
+                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">来源链接</div>
+                    <a href="${escapeHtml(ev.source_url)}" target="_blank" rel="noopener noreferrer" class="text-blue-600 break-all underline">${escapeHtml(ev.source_url)}</a>
+                </div>` : ''}
+                ${ev.details_json ? `
+                <div class="border-t border-gray-100 pt-4">
+                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">原始详情</div>
+                    <pre class="whitespace-pre-wrap bg-gray-50 border border-gray-200 p-3 rounded-sm">${escapeHtml(stringifyData(ev.details_json))}</pre>
                 </div>` : ''}
             </div>
         `;
         showModal(ev.title, content);
     } catch(e) {
-        showToast('Failed to load event detail', 'error');
+        showToast('加载事件详情失败', 'error');
     } finally {
         showLoading(false);
     }
+}
+
+function renderEventStatsRow(stats) {
+    const el = document.getElementById('events-stats-row');
+    if (!el) return;
+    const byStatus = stats?.by_status || {};
+    el.innerHTML = [
+        ['全部事件', stats?.total_events ?? '—'],
+        ['待处理', byStatus.pending ?? 0],
+        ['事件池', byStatus.pool ?? 0],
+        ['已质检', byStatus.checked ?? 0],
+        ['处理中', byStatus.processing ?? 0],
+        ['已完成', byStatus.completed ?? 0],
+    ].map(([label, value]) => `
+        <div class="tech-card p-4">
+            <div class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold mb-2">${label}</div>
+            <div class="text-2xl font-mono font-light tracking-tighter">${value}</div>
+        </div>
+    `).join('');
 }
 
 function formatImageryStatus(event) {
@@ -464,94 +688,207 @@ function formatImageryStatus(event) {
     const postWin = event.post_window_days ?? 7;
 
     const preBadge = preOk
-        ? `<span class="px-1.5 py-0.5 bg-green-100 text-green-700 text-[9px] font-bold">pre✓</span>`
+        ? `<span class="px-1.5 py-0.5 bg-green-100 text-green-700 text-[9px] font-bold">前✓</span>`
         : preExhausted
-            ? `<span class="px-1.5 py-0.5 bg-red-100 text-red-700 text-[9px] font-bold">pre✗</span>`
-            : `<span class="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 text-[9px] font-bold">pre⏳${preWin}d</span>`;
+            ? `<span class="px-1.5 py-0.5 bg-red-100 text-red-700 text-[9px] font-bold">前✗</span>`
+            : `<span class="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 text-[9px] font-bold">前⏳${preWin}天</span>`;
 
     const postBadge = postOk
-        ? `<span class="px-1.5 py-0.5 bg-green-100 text-green-700 text-[9px] font-bold">post✓</span>`
+        ? `<span class="px-1.5 py-0.5 bg-green-100 text-green-700 text-[9px] font-bold">后✓</span>`
         : !postOpen
-            ? `<span class="px-1.5 py-0.5 bg-red-100 text-red-700 text-[9px] font-bold">post✗</span>`
-            : `<span class="px-1.5 py-0.5 bg-blue-100 text-blue-700 text-[9px] font-bold">post⏳${postWin}d</span>`;
+            ? `<span class="px-1.5 py-0.5 bg-red-100 text-red-700 text-[9px] font-bold">后✗</span>`
+            : `<span class="px-1.5 py-0.5 bg-blue-100 text-blue-700 text-[9px] font-bold">后⏳${postWin}天</span>`;
 
     return `<div class="flex gap-1">${preBadge}${postBadge}</div>`;
 }
 
-async function processEvent(uuid) {
+function canProcessEvent(status) {
+    return ['pending', 'pool', 'checked'].includes(String(status || '').toLowerCase());
+}
+
+function renderProcessButton(event) {
+    if (!canProcessEvent(event?.status)) {
+        return '<span class="inline-flex px-2 py-1 border border-gray-200 text-gray-400 font-mono text-[10px] font-bold uppercase cursor-not-allowed">不可推进</span>';
+    }
+    return `<button onclick="window.processEvent('${event.uuid}', '${event.status}')" class="px-2 py-1 border border-gray-300 hover:border-black hover:bg-black hover:text-white transition-colors font-mono text-[10px] font-bold uppercase">推进</button>`;
+}
+
+async function processEvent(uuid, status = '') {
+    if (!canProcessEvent(status)) {
+        showToast(`当前状态 ${labelStatus(status)} 不支持手动推进`, 'info');
+        return;
+    }
     showLoading(true);
     try {
         const response = await authFetch(`${EVENTS_API}/${uuid}/process`, { method: 'POST' });
         if (response.ok) {
-            showToast('Event processing initiated', 'success');
+            showToast('已触发事件推进', 'success');
             setTimeout(() => loadEvents(_eventsPage), 2000);
         } else {
-            showToast('Failed to process event', 'error');
+            const err = await response.json().catch(() => ({ detail: response.statusText }));
+            throw new Error(err.detail || response.statusText);
         }
     } catch (error) {
-        showToast('Connection error', 'error');
+        showToast('推进事件失败: ' + error.message, 'error');
     } finally {
         showLoading(false);
     }
 }
 
 // ==================== Products ====================
-async function loadProducts() {
+async function loadProducts(page = 1) {
+    _productsPage = page;
     showLoading(true);
 
     try {
-        const response = await authFetch(`${PRODUCTS_API}?page=1&limit=50`);
+        const summaryGenerated = document.getElementById('prod-filter-summary')?.value || '';
+        const category = document.getElementById('prod-filter-category')?.value || '';
+        const country = document.getElementById('prod-filter-country')?.value || '';
+
+        let url = `${PRODUCTS_API}?page=${page}&limit=30`;
+        if (summaryGenerated) url += `&summary_generated=${summaryGenerated}`;
+        if (category) url += `&category=${encodeURIComponent(category.trim().toUpperCase())}`;
+        if (country) url += `&country=${encodeURIComponent(country)}`;
+
+        const response = await authFetch(url);
         if (!response.ok) throw new Error(`HTTP_${response.status}`);
 
         const data = await response.json();
         const products = data.data || [];
 
+        renderProductsSummary(products, data.total ?? 0);
+        const countHint = document.getElementById('products-count-hint');
+        if (countHint) {
+            countHint.textContent = `共 ${data.total ?? 0} 条，当前第 ${data.page ?? page} 页`;
+        }
+
         const tbody = document.getElementById('products-tbody');
         tbody.innerHTML = products.map(product => `
             <tr class="border-b border-gray-100 hover:bg-gray-50">
                 <td class="py-4 px-6 text-gray-500 font-mono text-[10px]">${product.uuid.substring(0, 8)}...</td>
-                <td class="py-4 px-6 font-bold text-black max-w-sm truncate">${escapeHtml(product.event_title || 'N/A')}</td>
-                <td class="py-4 px-6"><span class="px-2 py-1 ${product.summary_generated ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'} text-[10px] font-bold uppercase">${product.summary_generated ? 'YES' : 'NO'}</span></td>
+                <td class="py-4 px-6 font-bold text-black max-w-sm truncate">${escapeHtml(product.event_title || '暂无')}</td>
+                <td class="py-4 px-6 text-gray-600">${escapeHtml(product.event_category || '暂无')}</td>
+                <td class="py-4 px-6 text-gray-600">${escapeHtml(product.event_country || '暂无')}</td>
+                <td class="py-4 px-6"><span class="px-2 py-1 ${product.summary_generated ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'} text-[10px] font-bold uppercase">${product.summary_generated ? '已生成' : '未生成'}</span></td>
+                <td class="py-4 px-6 text-gray-600">${formatQualityScore(product.inference_result)}</td>
                 <td class="py-4 px-6 text-gray-600 text-xs">${formatDate(product.created_at)}</td>
+                <td class="py-4 px-6 text-right">
+                    <button onclick="window.showProductDetail('${product.uuid}')" class="px-3 py-1 border border-gray-300 hover:border-black hover:bg-black hover:text-white transition-colors font-mono text-[10px] font-bold uppercase">详情</button>
+                </td>
             </tr>
-        `).join('') || '<tr><td colspan="4" class="py-12 text-center text-gray-400 font-mono text-xs uppercase">NO_PRODUCTS</td></tr>';
+        `).join('') || '<tr><td colspan="8" class="py-12 text-center text-gray-400 font-mono text-xs uppercase">暂无成品</td></tr>';
+
+        renderPagination('products-pagination', data.page, data.pages, loadProducts);
 
     } catch (error) {
         console.error('Products load failed:', error);
-        showToast('Failed to load products', 'error');
+        showToast('加载成品列表失败', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+function renderProductsSummary(products, total) {
+    const el = document.getElementById('products-summary-row');
+    if (!el) return;
+    const generatedCount = products.filter(item => item.summary_generated).length;
+    const pendingCount = products.length - generatedCount;
+    const categories = new Set(products.map(item => item.event_category).filter(Boolean)).size;
+    const countries = new Set(products.map(item => item.event_country).filter(Boolean)).size;
+    el.innerHTML = [
+        ['当前筛选总数', total],
+        ['本页已生成摘要', generatedCount],
+        ['本页待补摘要', pendingCount],
+        ['本页覆盖国家/类别', `${countries}/${categories}`],
+    ].map(([label, value]) => `
+        <div class="tech-card p-4">
+            <div class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold mb-2">${label}</div>
+            <div class="text-2xl font-mono font-light tracking-tighter">${value}</div>
+        </div>
+    `).join('');
+}
+
+async function showProductDetail(uuid) {
+    showLoading(true);
+    try {
+        const response = await authFetch(`${PRODUCTS_API}/${uuid}`);
+        if (!response.ok) throw new Error(`HTTP_${response.status}`);
+        const product = await response.json();
+        const content = `
+            <div class="space-y-4 font-mono text-xs">
+                <div class="grid grid-cols-2 gap-3">
+                    <div><span class="text-gray-500 uppercase">事件标题</span><div class="font-bold mt-1">${escapeHtml(product.event_title || '暂无')}</div></div>
+                    <div><span class="text-gray-500 uppercase">UUID</span><div class="font-bold mt-1 break-all">${escapeHtml(product.uuid)}</div></div>
+                    <div><span class="text-gray-500 uppercase">类别</span><div class="font-bold mt-1">${escapeHtml(product.event_category || '暂无')}</div></div>
+                    <div><span class="text-gray-500 uppercase">国家</span><div class="font-bold mt-1">${escapeHtml(product.event_country || '暂无')}</div></div>
+                    <div><span class="text-gray-500 uppercase">摘要状态</span><div class="font-bold mt-1">${product.summary_generated ? '已生成' : '未生成'}</div></div>
+                    <div><span class="text-gray-500 uppercase">推理质量分</span><div class="font-bold mt-1">${product.inference_quality_score ?? '暂无'}</div></div>
+                    <div><span class="text-gray-500 uppercase">灾前影像日期</span><div class="font-bold mt-1">${formatDateTime(product.pre_image_date)}</div></div>
+                    <div><span class="text-gray-500 uppercase">灾后影像日期</span><div class="font-bold mt-1">${formatDateTime(product.post_image_date)}</div></div>
+                </div>
+                <div class="border-t border-gray-100 pt-4">
+                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">AI 摘要</div>
+                    <div class="leading-6 whitespace-pre-wrap">${escapeHtml(product.summary || '暂无摘要')}</div>
+                </div>
+                <div class="border-t border-gray-100 pt-4">
+                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">推理结果</div>
+                    <pre class="whitespace-pre-wrap bg-gray-50 border border-gray-200 p-3 rounded-sm">${escapeHtml(stringifyData(product.inference_result || '暂无推理结果'))}</pre>
+                </div>
+                ${product.event_details ? `
+                <div class="border-t border-gray-100 pt-4">
+                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">事件快照</div>
+                    <pre class="whitespace-pre-wrap bg-gray-50 border border-gray-200 p-3 rounded-sm">${escapeHtml(stringifyData(product.event_details))}</pre>
+                </div>` : ''}
+            </div>
+        `;
+        showModal(`成品详情 ${uuid.slice(0, 8)}`, content);
+    } catch (error) {
+        showToast('加载成品详情失败', 'error');
     } finally {
         showLoading(false);
     }
 }
 
 // ==================== Reports ====================
-async function loadReports() {
+async function loadReports(page = 1) {
+    _reportsPage = page;
     showLoading(true);
 
     try {
-        const response = await authFetch(`${REPORTS_API}?page=1&limit=30`);
+        const response = await authFetch(`${REPORTS_API}?page=${page}&limit=30`);
         if (!response.ok) throw new Error(`HTTP_${response.status}`);
 
         const data = await response.json();
         const reports = data.data || [];
 
+        renderReportsSummary(reports, data.total ?? 0);
+
         const tbody = document.getElementById('reports-tbody');
         tbody.innerHTML = reports.map(report => `
             <tr class="border-b border-gray-100 hover:bg-gray-50">
                 <td class="py-4 px-6 font-mono font-bold">${report.report_date}</td>
+                <td class="py-4 px-6 font-semibold text-black max-w-xs truncate">${escapeHtml(report.report_title || '未命名日报')}</td>
                 <td class="py-4 px-6 text-gray-600">${report.event_count || 0}</td>
-                <td class="py-4 px-6"><span class="px-2 py-1 ${report.published ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'} text-[10px] font-bold uppercase">${report.published ? 'PUBLISHED' : 'DRAFT'}</span></td>
+                <td class="py-4 px-6 text-gray-600 text-xs">${formatDateTime(report.generated_at)}</td>
+                <td class="py-4 px-6"><span class="px-2 py-1 ${report.published ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'} text-[10px] font-bold uppercase">${report.published ? '已发布' : '草稿'}</span></td>
                 <td class="py-4 px-6 text-right">
                     <button onclick="window.viewReport('${report.report_date}')" class="px-3 py-1 border border-gray-300 hover:border-black hover:bg-black hover:text-white transition-colors font-mono text-[10px] font-bold uppercase">
-                        VIEW
+                        查看
                     </button>
+                    ${report.published ? '' : `
+                        <button onclick="window.publishReport('${report.report_date}')" class="px-3 py-1 border border-gray-300 hover:border-black hover:bg-black hover:text-white transition-colors font-mono text-[10px] font-bold uppercase ml-1">
+                            发布
+                        </button>
+                    `}
                 </td>
             </tr>
-        `).join('') || '<tr><td colspan="4" class="py-12 text-center text-gray-400 font-mono text-xs uppercase">NO_REPORTS</td></tr>';
+        `).join('') || '<tr><td colspan="6" class="py-12 text-center text-gray-400 font-mono text-xs uppercase">暂无日报</td></tr>';
+
+        renderPagination('reports-pagination', data.page, data.pages, loadReports);
 
     } catch (error) {
         console.error('Reports load failed:', error);
-        showToast('Failed to load reports', 'error');
+        showToast('加载日报列表失败', 'error');
     } finally {
         showLoading(false);
     }
@@ -561,9 +898,8 @@ async function generateReport() {
     showLoading(true);
 
     try {
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        const reportDate = yesterday.toISOString().split('T')[0];
+        const input = document.getElementById('report-generate-date');
+        const reportDate = input?.value || formatDateInput(new Date(Date.now() - 86400000));
 
         const response = await authFetch(`${REPORTS_API}/generate`, {
             method: 'POST',
@@ -572,13 +908,13 @@ async function generateReport() {
         });
 
         if (response.ok) {
-            showToast('Report generation started', 'success');
+            showToast('日报生成任务已启动', 'success');
             setTimeout(loadReports, 2000);
         } else {
-            showToast('Failed to generate report', 'error');
+            showToast('生成日报失败', 'error');
         }
     } catch (error) {
-        showToast('Connection error', 'error');
+        showToast('连接失败，请稍后重试', 'error');
     } finally {
         showLoading(false);
     }
@@ -592,9 +928,72 @@ async function viewReport(date) {
         if (!response.ok) throw new Error(`HTTP_${response.status}`);
 
         const data = await response.json();
-        showModal(`REPORT_${date}`, `<pre class="font-mono text-xs whitespace-pre-wrap">${escapeHtml(data.report_content || 'No content')}</pre>`);
+        const content = `
+            <div class="space-y-4 font-mono text-xs">
+                <div class="grid grid-cols-2 gap-3">
+                    <div><span class="text-gray-500 uppercase">日期</span><div class="font-bold mt-1">${data.report_date}</div></div>
+                    <div><span class="text-gray-500 uppercase">状态</span><div class="font-bold mt-1">${data.published ? '已发布' : '草稿'}</div></div>
+                    <div><span class="text-gray-500 uppercase">标题</span><div class="font-bold mt-1">${escapeHtml(data.report_title || '未命名日报')}</div></div>
+                    <div><span class="text-gray-500 uppercase">事件数量</span><div class="font-bold mt-1">${data.event_count || 0}</div></div>
+                    <div><span class="text-gray-500 uppercase">生成时间</span><div class="font-bold mt-1">${formatDateTime(data.generated_at)}</div></div>
+                    <div><span class="text-gray-500 uppercase">发布时间</span><div class="font-bold mt-1">${formatDateTime(data.published_at)}</div></div>
+                </div>
+                <div class="border-t border-gray-100 pt-4">
+                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">日报正文</div>
+                    <pre class="font-mono text-xs whitespace-pre-wrap bg-gray-50 border border-gray-200 p-3 rounded-sm">${escapeHtml(data.report_content || '暂无内容')}</pre>
+                </div>
+                ${(data.category_stats || data.severity_stats || data.country_stats) ? `
+                <div class="border-t border-gray-100 pt-4">
+                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">统计信息</div>
+                    <pre class="font-mono text-xs whitespace-pre-wrap bg-gray-50 border border-gray-200 p-3 rounded-sm">${escapeHtml(stringifyData({
+                        类别统计: data.category_stats,
+                        严重程度统计: data.severity_stats,
+                        国家统计: data.country_stats,
+                    }))}</pre>
+                </div>` : ''}
+            </div>
+        `;
+        showModal(`日报 ${date}`, content);
     } catch (error) {
-        showToast('Failed to load report', 'error');
+        showToast('加载日报详情失败', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+function renderReportsSummary(reports, total) {
+    const el = document.getElementById('reports-summary-row');
+    if (!el) return;
+    const published = reports.filter(item => item.published).length;
+    const draft = reports.length - published;
+    const totalEvents = reports.reduce((sum, item) => sum + (item.event_count || 0), 0);
+    el.innerHTML = [
+        ['当前筛选总数', total],
+        ['本页已发布', published],
+        ['本页草稿', draft],
+        ['本页覆盖事件', totalEvents],
+    ].map(([label, value]) => `
+        <div class="tech-card p-4">
+            <div class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold mb-2">${label}</div>
+            <div class="text-2xl font-mono font-light tracking-tighter">${value}</div>
+        </div>
+    `).join('');
+}
+
+async function publishReport(date) {
+    if (!window.confirm(`确认发布 ${date} 的日报吗？`)) return;
+    showLoading(true);
+    try {
+        const response = await authFetch(`${REPORTS_API}/${date}/publish`, { method: 'PUT' });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({ detail: response.statusText }));
+            throw new Error(err.detail || response.statusText);
+        }
+        const result = await response.json();
+        showToast(result.message || '日报已发布', 'success');
+        await loadReports(_reportsPage);
+    } catch (error) {
+        showToast('发布日报失败: ' + error.message, 'error');
     } finally {
         showLoading(false);
     }
@@ -613,18 +1012,92 @@ async function loadTokens() {
         const tbody = document.getElementById('tokens-tbody');
         tbody.innerHTML = (Array.isArray(tokens) ? tokens : []).map(token => `
             <tr class="border-b border-gray-100 hover:bg-gray-50">
+                <td class="py-4 px-6 font-mono text-[10px] text-gray-500">${escapeHtml(token.token || '暂无')}</td>
                 <td class="py-4 px-6 font-mono font-bold">${escapeHtml(token.name)}</td>
-                <td class="py-4 px-6"><span class="px-2 py-1 ${token.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'} text-[10px] font-bold uppercase">${token.is_active ? 'ENABLED' : 'DISABLED'}</span></td>
+                <td class="py-4 px-6 text-gray-600 max-w-xs truncate" title="${escapeHtml(token.description || '')}">${escapeHtml(token.description || '暂无')}</td>
+                <td class="py-4 px-6"><span class="px-2 py-1 ${token.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'} text-[10px] font-bold uppercase">${token.is_active ? '启用中' : '已禁用'}</span></td>
+                <td class="py-4 px-6 text-gray-600">${token.usage_count ?? 0}</td>
+                <td class="py-4 px-6 text-gray-600 text-xs">${formatDateTime(token.last_used)}</td>
                 <td class="py-4 px-6 text-gray-600 text-xs">${formatDate(token.created_at)}</td>
+                <td class="py-4 px-6 text-right">
+                    ${token.is_active ? `
+                        <button onclick="window.disableTokenFromButton(this)" data-token-name="${escapeHtml(token.name)}" data-token-created-at="${token.created_at}" class="px-3 py-1 border border-red-200 text-red-600 hover:border-red-500 hover:bg-red-50 transition-colors font-mono text-[10px] font-bold uppercase">禁用</button>
+                    ` : '<span class="text-gray-400 text-[10px]">无操作</span>'}
+                </td>
             </tr>
-        `).join('') || '<tr><td colspan="3" class="py-12 text-center text-gray-400 font-mono text-xs uppercase">NO_TOKENS</td></tr>';
+        `).join('') || '<tr><td colspan="8" class="py-12 text-center text-gray-400 font-mono text-xs uppercase">暂无令牌</td></tr>';
 
     } catch (error) {
         console.error('Tokens load failed:', error);
-        showToast('Failed to load tokens', 'error');
+        showToast('加载令牌列表失败', 'error');
     } finally {
         showLoading(false);
     }
+}
+
+async function createToken() {
+    const name = document.getElementById('token-name')?.value.trim();
+    const description = document.getElementById('token-description')?.value.trim() || '';
+    const scopesRaw = document.getElementById('token-scopes')?.value.trim() || 'tasks.read,tasks.update';
+    const scopes = scopesRaw.split(',').map(item => item.trim()).filter(Boolean);
+
+    if (!name) {
+        showToast('请先填写令牌名称', 'info');
+        return;
+    }
+
+    showLoading(true);
+    try {
+        const response = await authFetch(`${ADMIN_API}/tokens`, {
+            method: 'POST',
+            body: JSON.stringify({ name, description, scopes })
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({ detail: response.statusText }));
+            throw new Error(err.detail || response.statusText);
+        }
+        const result = await response.json();
+        showModal('新令牌已创建', `
+            <div class="space-y-4 font-mono text-xs">
+                <div>令牌名称：<span class="font-bold">${escapeHtml(result.name)}</span></div>
+                <div>创建时间：<span class="font-bold">${formatDateTime(result.created_at)}</span></div>
+                <div class="border border-red-200 bg-red-50 p-3 leading-6">完整令牌仅显示这一次，请立即保存到你的 Worker 配置中。</div>
+                <pre class="whitespace-pre-wrap break-all bg-gray-50 border border-gray-200 p-3 rounded-sm">${escapeHtml(result.token)}</pre>
+            </div>
+        `);
+        document.getElementById('token-name').value = '';
+        document.getElementById('token-description').value = '';
+        await loadTokens();
+        showToast('令牌创建成功', 'success');
+    } catch (error) {
+        showToast('创建令牌失败: ' + error.message, 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+async function disableToken(name, createdAt) {
+    if (!window.confirm(`确认禁用令牌 "${name}" 吗？`)) return;
+    showLoading(true);
+    try {
+        const response = await authFetch(`${ADMIN_API}/tokens/${encodeURIComponent(name)}?created_at=${encodeURIComponent(createdAt)}`, { method: 'DELETE' });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({ detail: response.statusText }));
+            throw new Error(err.detail || response.statusText);
+        }
+        const result = await response.json();
+        showToast(result.message || '令牌已禁用', 'success');
+        await loadTokens();
+    } catch (error) {
+        showToast('禁用令牌失败: ' + error.message, 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+function disableTokenFromButton(button) {
+    const { tokenName, tokenCreatedAt } = button.dataset;
+    return disableToken(tokenName || '', Number(tokenCreatedAt));
 }
 
 // ==================== Manual Jobs ====================
@@ -643,12 +1116,12 @@ async function triggerJob(job) {
     try {
         const response = await authFetch(`${ADMIN_API}/jobs/${jobId}/trigger`, { method: 'POST' });
         if (response.ok) {
-            showToast(`Job ${jobId} triggered successfully`, 'success');
+            showToast(`${JOB_LABELS[jobId] || jobId} 已触发`, 'success');
         } else {
-            showToast('Failed to trigger job', 'error');
+            showToast('触发任务失败', 'error');
         }
     } catch (error) {
-        showToast('Connection error', 'error');
+        showToast('连接失败，请稍后重试', 'error');
     } finally {
         showLoading(false);
     }
@@ -664,7 +1137,7 @@ function renderPagination(containerId, current, total, loadFn) {
     for (let i = Math.max(1, current - 2); i <= Math.min(total, current + 2); i++) pages.push(i);
 
     el.innerHTML = `
-        <span class="font-mono text-[10px] text-gray-500">Page ${current} / ${total}</span>
+        <span class="font-mono text-[10px] text-gray-500">第 ${current} / ${total} 页</span>
         <div class="flex gap-1">
             ${current > 1 ? `<button onclick="window._pgCall('${loadFn.name}',${current-1})" class="px-3 py-1 border border-gray-200 font-mono text-[10px] hover:border-black">‹</button>` : ''}
             ${pages.map(p => `<button onclick="window._pgCall('${loadFn.name}',${p})" class="px-3 py-1 border font-mono text-[10px] ${p===current ? 'border-black bg-black text-white' : 'border-gray-200 hover:border-black'}">${p}</button>`).join('')}
@@ -709,7 +1182,7 @@ function showToast(message, type = 'info') {
 
     toast.className = `toast tech-card p-4 border-l-4 ${colors[type] || colors.info}`;
     toast.innerHTML = `
-        <div class="font-mono text-xs font-bold tracking-wider uppercase mb-1">${type.toUpperCase()}</div>
+        <div class="font-mono text-xs font-bold tracking-wider uppercase mb-1">${TOAST_TYPE_LABELS[type] || TOAST_TYPE_LABELS.info}</div>
         <div class="font-mono text-xs text-gray-700">${escapeHtml(message)}</div>
     `;
 
@@ -725,12 +1198,12 @@ function showModal(title, content) {
     modal.id = 'detail-modal';
     modal.className = 'fixed inset-0 flex items-center justify-center z-50 bg-black/40 backdrop-blur-sm';
     modal.innerHTML = `
-        <div class="bg-white border border-gray-200 shadow-[8px_8px_0_#d4d4d4] w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col">
-            <div class="flex justify-between items-center px-6 py-4 border-b border-gray-200">
+        <div class="bg-white border border-gray-200 shadow-[8px_8px_0_#d4d4d4] w-full max-w-4xl mx-3 md:mx-4 max-h-[92vh] md:max-h-[86vh] flex flex-col">
+            <div class="sticky top-0 bg-white flex justify-between items-center px-4 md:px-6 py-4 border-b border-gray-200">
                 <span class="font-mono text-sm font-bold tracking-widest uppercase truncate pr-4">${escapeHtml(title)}</span>
-                <button onclick="document.getElementById('detail-modal').remove()" class="font-mono text-xs font-bold px-3 py-1 border border-gray-300 hover:border-black uppercase">CLOSE</button>
+                <button onclick="document.getElementById('detail-modal').remove()" class="font-mono text-xs font-bold px-3 py-2 border border-gray-300 hover:border-black uppercase shrink-0">关闭</button>
             </div>
-            <div class="overflow-y-auto p-6">${content}</div>
+            <div class="overflow-y-auto p-4 md:p-6">${content}</div>
         </div>
     `;
     document.body.appendChild(modal);
@@ -747,10 +1220,65 @@ function getSeverityClass(severity) {
     return map[severity?.toLowerCase()] || 'bg-gray-300 text-gray-700';
 }
 
+function syncCategoryOptions(selectId, byCategory) {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+    const current = select.value;
+    const options = Object.entries(byCategory || {})
+        .sort((a, b) => b[1] - a[1])
+        .map(([key, count]) => `<option value="${escapeHtml(key)}">${escapeHtml(key)} (${count})</option>`)
+        .join('');
+    select.innerHTML = `<option value="">全部</option>${options}`;
+    if ([...select.options].some(option => option.value === current)) {
+        select.value = current;
+    }
+}
+
+function labelStatus(status) {
+    return STATUS_LABELS[status] || (status || '暂无');
+}
+
+function labelSeverity(severity) {
+    if (!severity) return '暂无';
+    return SEVERITY_LABELS[String(severity).toLowerCase()] || severity;
+}
+
 function formatDate(timestamp) {
-    if (!timestamp) return 'N/A';
+    if (!timestamp) return '暂无';
     const date = new Date(timestamp);
-    return date.toISOString().split('T')[0];
+    if (Number.isNaN(date.getTime())) return '暂无';
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function formatDateTime(timestamp) {
+    if (!timestamp) return '暂无';
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return '暂无';
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function formatDateInput(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function stringifyData(data) {
+    if (typeof data === 'string') return data;
+    try {
+        return JSON.stringify(data, null, 2);
+    } catch {
+        return String(data);
+    }
+}
+
+function formatQualityScore(inferenceResult) {
+    if (!inferenceResult || typeof inferenceResult !== 'object') return '暂无';
+    const scores = Object.values(inferenceResult)
+        .map(item => item?.quality_score)
+        .filter(value => typeof value === 'number');
+    if (scores.length === 0) return '暂无';
+    const avg = scores.reduce((sum, value) => sum + value, 0) / scores.length;
+    return avg.toFixed(2);
 }
 
 function escapeHtml(text) {
@@ -774,7 +1302,7 @@ async function loadSettings() {
         _fillSettingsForm(data);
         lucide.createIcons();
     } catch (e) {
-        showToast('Failed to load settings: ' + e.message, 'error');
+        showToast('加载配置失败: ' + e.message, 'error');
     } finally {
         showLoading(false);
     }
@@ -811,24 +1339,10 @@ async function saveSettingsGroup(sectionId) {
     const section = document.getElementById(sectionId);
     if (!section) return;
 
-    const updates = {};
-    section.querySelectorAll('[data-key]').forEach(el => {
-        const key = el.dataset.key;
-        let value = el.value;
-
-        if (el.type === 'password') {
-            if (!value.trim()) return;
-        }
-        if (el.tagName === 'SELECT') {
-            updates[key] = value;
-            return;
-        }
-        if (value === '' && _settingsCache[key] !== undefined) return;
-        updates[key] = value;
-    });
+    const updates = collectSettingsUpdates(section);
 
     if (Object.keys(updates).length === 0) {
-        showToast('No changes to save', 'info');
+        showToast('没有需要保存的改动', 'info');
         return;
     }
 
@@ -843,19 +1357,75 @@ async function saveSettingsGroup(sectionId) {
             throw new Error(err.detail || resp.statusText);
         }
         const result = await resp.json();
-        showToast(result.message || 'Settings saved', 'success');
+        showToast(result.message || '配置已保存', 'success');
         await loadSettings();
     } catch (e) {
-        showToast('Save failed: ' + e.message, 'error');
+        showToast('保存失败: ' + e.message, 'error');
     } finally {
         showLoading(false);
     }
 }
 
+async function saveAllSettings() {
+    const section = document.getElementById('view-settings');
+    if (!section) return;
+    const updates = collectSettingsUpdates(section);
+    if (Object.keys(updates).length === 0) {
+        showToast('没有需要保存的改动', 'info');
+        return;
+    }
+
+    showLoading(true);
+    try {
+        const resp = await authFetch(`${ADMIN_API}/settings`, {
+            method: 'PUT',
+            body: JSON.stringify(updates),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+            throw new Error(err.detail || resp.statusText);
+        }
+        const result = await resp.json();
+        showToast(result.message || '配置已保存', 'success');
+        await loadSettings();
+    } catch (e) {
+        showToast('保存失败: ' + e.message, 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+function collectSettingsUpdates(container) {
+    const updates = {};
+    container.querySelectorAll('[data-key]').forEach(el => {
+        const key = el.dataset.key;
+        const currentValue = _settingsCache[key];
+        let value = el.value;
+
+        if (el.type === 'password') {
+            if (!value.trim()) return;
+            updates[key] = value;
+            return;
+        }
+
+        if (el.tagName === 'SELECT') {
+            if (String(currentValue) !== value) updates[key] = value;
+            return;
+        }
+
+        if (value === '' && currentValue !== undefined) return;
+        if (String(currentValue ?? '') !== value) updates[key] = value;
+    });
+    return updates;
+}
+
 // ==================== 全局导出 ====================
 window.processEvent = processEvent;
+window.showPoolEventDetail = showPoolEventDetail;
 window.showEventDetail = showEventDetail;
+window.showProductDetail = showProductDetail;
 window.viewReport = viewReport;
+window.publishReport = publishReport;
 window.generateReport = generateReport;
 window.loadEvents = loadEvents;
 window.loadPool = loadPool;
@@ -866,8 +1436,12 @@ window.switchPoolTab = switchPoolTab;
 window.loadProducts = loadProducts;
 window.loadReports = loadReports;
 window.loadTokens = loadTokens;
+window.createToken = createToken;
+window.disableToken = disableToken;
+window.disableTokenFromButton = disableTokenFromButton;
 window.triggerJob = triggerJob;
 window.loadSettings = loadSettings;
+window.saveAllSettings = saveAllSettings;
 window.toggleSection = toggleSection;
 window.saveSettingsGroup = saveSettingsGroup;
 window.switchView = switchView;

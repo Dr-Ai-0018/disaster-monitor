@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DISASTER_MONITOR // Admin Control</title>
+    <title>DISASTER_MONITOR // 管理后台</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@100;300;400;700&display=swap" rel="stylesheet">
@@ -102,6 +102,18 @@
             box-shadow: 1px 1px 0 #d4d4d4;
             transform: translate(2px, 2px);
         }
+        .sidebar-open {
+            overflow: hidden;
+        }
+        .admin-table-wrap {
+            overscroll-behavior-x: contain;
+        }
+        @media (max-width: 1023px) {
+            .tech-card:hover {
+                box-shadow: none;
+                transform: none;
+            }
+        }
     </style>
 </head>
 <body class="font-sans antialiased selection:bg-black selection:text-white">
@@ -114,20 +126,20 @@
                     <div class="inline-flex items-center justify-center w-16 h-16 bg-black text-white mb-4 shadow-[4px_4px_0_#d4d4d4]">
                         <i data-lucide="shield" class="w-8 h-8"></i>
                     </div>
-                    <h1 class="font-mono font-bold tracking-widest text-2xl mb-2">ADMIN_CONTROL</h1>
-                    <p class="font-mono text-xs text-gray-500 uppercase tracking-widest">Disaster Monitor System</p>
+                    <h1 class="font-mono font-bold tracking-widest text-2xl mb-2">管理后台</h1>
+                    <p class="font-mono text-xs text-gray-500 uppercase tracking-widest">灾害监测系统</p>
                 </div>
                 <form id="login-form" class="space-y-6">
                     <div>
-                        <label class="block font-mono text-xs font-bold tracking-widest uppercase text-gray-600 mb-2">Username</label>
+                        <label class="block font-mono text-xs font-bold tracking-widest uppercase text-gray-600 mb-2">用户名</label>
                         <input type="text" id="username" class="w-full px-4 py-3 border border-gray-200 font-mono text-sm focus:outline-none focus:border-black transition-colors" placeholder="admin" required>
                     </div>
                     <div>
-                        <label class="block font-mono text-xs font-bold tracking-widest uppercase text-gray-600 mb-2">Password</label>
+                        <label class="block font-mono text-xs font-bold tracking-widest uppercase text-gray-600 mb-2">密码</label>
                         <input type="password" id="password" class="w-full px-4 py-3 border border-gray-200 font-mono text-sm focus:outline-none focus:border-black transition-colors" placeholder="••••••••" required>
                     </div>
                     <button type="submit" class="w-full py-3 bg-black text-white font-mono text-xs font-bold tracking-widest uppercase hover:bg-gray-800 transition-colors shadow-[4px_4px_0_#d4d4d4] hover:shadow-[2px_2px_0_#d4d4d4] hover:translate-x-[2px] hover:translate-y-[2px]">
-                        AUTHENTICATE
+                        登录
                     </button>
                 </form>
             </div>
@@ -135,70 +147,106 @@
     </div>
 
     <!-- 主界面 -->
-    <div class="hidden flex h-screen overflow-hidden" id="admin-panel">
+    <div class="hidden relative h-screen overflow-hidden" id="admin-panel">
+        <div id="sidebar-backdrop" class="hidden fixed inset-0 z-30 bg-black/30 backdrop-blur-[2px] lg:hidden"></div>
         
         <!-- 侧边栏 -->
-        <aside class="w-64 bg-white border-r border-gray-200 flex flex-col">
+        <aside id="admin-sidebar" class="fixed inset-y-0 left-0 z-40 w-[18.5rem] max-w-[85vw] -translate-x-full bg-white border-r border-gray-200 flex flex-col transition-transform duration-300 ease-out lg:static lg:z-auto lg:w-64 lg:max-w-none lg:translate-x-0">
             <div class="p-6 border-b border-gray-200">
+                <div class="flex items-center justify-between gap-3 mb-2">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 bg-black text-white flex items-center justify-center shadow-[2px_2px_0_#d4d4d4]">
+                            <i data-lucide="shield" class="w-4 h-4"></i>
+                        </div>
+                        <h1 class="font-mono font-bold tracking-widest text-sm">管理后台</h1>
+                    </div>
+                    <button id="sidebar-close-btn" class="lg:hidden w-9 h-9 border border-gray-200 flex items-center justify-center hover:border-black transition-colors">
+                        <i data-lucide="x" class="w-4 h-4"></i>
+                    </button>
+                </div>
                 <div class="flex items-center gap-3 mb-2">
                     <div class="w-8 h-8 bg-black text-white flex items-center justify-center shadow-[2px_2px_0_#d4d4d4]">
-                        <i data-lucide="shield" class="w-4 h-4"></i>
+                        <i data-lucide="layout-dashboard" class="w-4 h-4"></i>
                     </div>
-                    <h1 class="font-mono font-bold tracking-widest text-sm">ADMIN_CONTROL</h1>
+                    <div>
+                        <div class="font-mono font-bold tracking-widest text-sm" id="sidebar-current-view">系统概览</div>
+                        <div class="font-mono text-[10px] text-gray-400 tracking-widest">当前模块</div>
+                    </div>
                 </div>
-                <p class="font-mono text-[10px] text-gray-400 uppercase tracking-widest ml-11">v1.0.0 // System</p>
+                <p class="font-mono text-[10px] text-gray-400 uppercase tracking-widest ml-11">v1.0.0 // 系统</p>
             </div>
             
             <nav class="flex-1 p-4 space-y-1" id="sidebar-nav">
                 <a href="#" class="nav-item flex items-center gap-3 px-4 py-3 font-mono text-xs font-bold tracking-widest uppercase transition-colors bg-black text-white" data-view="dashboard">
                     <i data-lucide="layout-dashboard" class="w-4 h-4"></i>
-                    <span>Dashboard</span>
+                    <span>系统概览</span>
                 </a>
                 <a href="#" class="nav-item flex items-center gap-3 px-4 py-3 font-mono text-xs font-bold tracking-widest uppercase text-gray-600 hover:bg-gray-100 hover:text-black transition-colors" data-view="pool">
                     <i data-lucide="database" class="w-4 h-4"></i>
-                    <span>Event Pool</span>
+                    <span>事件池</span>
                 </a>
                 <a href="#" class="nav-item flex items-center gap-3 px-4 py-3 font-mono text-xs font-bold tracking-widest uppercase text-gray-600 hover:bg-gray-100 hover:text-black transition-colors" data-view="events">
                     <i data-lucide="alert-circle" class="w-4 h-4"></i>
-                    <span>Events</span>
+                    <span>事件管理</span>
                 </a>
                 <a href="#" class="nav-item flex items-center gap-3 px-4 py-3 font-mono text-xs font-bold tracking-widest uppercase text-gray-600 hover:bg-gray-100 hover:text-black transition-colors" data-view="products">
                     <i data-lucide="package" class="w-4 h-4"></i>
-                    <span>Products</span>
+                    <span>成品池</span>
                 </a>
                 <a href="#" class="nav-item flex items-center gap-3 px-4 py-3 font-mono text-xs font-bold tracking-widest uppercase text-gray-600 hover:bg-gray-100 hover:text-black transition-colors" data-view="reports">
                     <i data-lucide="file-text" class="w-4 h-4"></i>
-                    <span>Reports</span>
+                    <span>日报</span>
                 </a>
                 <a href="#" class="nav-item flex items-center gap-3 px-4 py-3 font-mono text-xs font-bold tracking-widest uppercase text-gray-600 hover:bg-gray-100 hover:text-black transition-colors" data-view="tokens">
                     <i data-lucide="key" class="w-4 h-4"></i>
-                    <span>Tokens</span>
+                    <span>令牌</span>
                 </a>
                 <a href="#" class="nav-item flex items-center gap-3 px-4 py-3 font-mono text-xs font-bold tracking-widest uppercase text-gray-600 hover:bg-gray-100 hover:text-black transition-colors" data-view="settings">
                     <i data-lucide="settings" class="w-4 h-4"></i>
-                    <span>Settings</span>
+                    <span>系统配置</span>
                 </a>
             </nav>
             
             <div class="p-4 border-t border-gray-200">
                 <button id="logout-btn" class="w-full px-4 py-3 border border-gray-300 font-mono text-xs font-bold tracking-widest uppercase text-gray-600 hover:border-black hover:text-black transition-colors">
                     <i data-lucide="log-out" class="w-4 h-4 inline-block mr-2"></i>
-                    Logout
+                    退出登录
                 </button>
             </div>
         </aside>
 
         <!-- 主内容区 -->
-        <main class="flex-1 overflow-y-auto">
-            <div class="p-8 max-w-[1400px] mx-auto">
+        <main class="h-full overflow-y-auto lg:ml-0">
+            <div class="sticky top-0 z-20 border-b border-gray-200 bg-white/90 backdrop-blur-md">
+                <div class="max-w-[1400px] mx-auto px-4 py-3 md:px-6 lg:px-8 flex items-center justify-between gap-4">
+                    <div class="flex items-center gap-3 min-w-0">
+                        <button id="sidebar-toggle-btn" class="lg:hidden w-10 h-10 border border-gray-200 bg-white flex items-center justify-center hover:border-black transition-colors shrink-0">
+                            <i data-lucide="menu" class="w-4 h-4"></i>
+                        </button>
+                        <div class="min-w-0">
+                            <div class="font-mono text-[10px] uppercase tracking-[0.18em] text-gray-400">Disaster Monitor</div>
+                            <h1 id="topbar-title" class="font-mono text-sm md:text-base font-bold tracking-widest truncate">系统概览</h1>
+                        </div>
+                    </div>
+                    <div class="hidden md:flex items-center gap-3 shrink-0">
+                        <div class="px-3 py-2 border border-gray-200 bg-gray-50 font-mono text-[10px] uppercase tracking-widest text-gray-500">
+                            <span>管理模式</span>
+                        </div>
+                        <div class="px-3 py-2 border border-gray-200 bg-white shadow-[2px_2px_0_#e5e5e5]">
+                            <span class="font-mono text-[10px] uppercase tracking-widest text-gray-500" id="topbar-date">--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="p-4 md:p-6 lg:p-8 max-w-[1400px] mx-auto">
                 
                 <!-- Dashboard 视图 -->
                 <div class="space-y-6" id="view-dashboard">
-                    <div class="flex justify-between items-center">
-                        <h2 class="font-mono text-2xl font-bold tracking-widest">SYSTEM_DASHBOARD</h2>
+                    <div class="flex flex-col gap-4 md:flex-row md:justify-between md:items-center">
+                        <h2 class="font-mono text-2xl font-bold tracking-widest">系统概览</h2>
                         <div class="flex items-center gap-2 px-3 py-1.5 border border-gray-200 bg-white shadow-[2px_2px_0_#e5e5e5]">
                             <span class="w-2 h-2 rounded-full bg-green-500 relative pulse-dot"></span>
-                            <span class="font-mono text-xs font-semibold tracking-wider">ONLINE</span>
+                            <span class="font-mono text-xs font-semibold tracking-wider">在线</span>
                         </div>
                     </div>
                     
@@ -206,36 +254,36 @@
 
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         <div class="tech-card p-6">
-                            <h3 class="font-mono text-sm font-bold tracking-widest mb-6 pb-4 border-b border-gray-100">SYSTEM_STATUS</h3>
+                            <h3 class="font-mono text-sm font-bold tracking-widest mb-6 pb-4 border-b border-gray-100">系统状态</h3>
                             <div id="system-status" class="space-y-4"></div>
                         </div>
                         
                         <div class="tech-card p-6">
-                            <h3 class="font-mono text-sm font-bold tracking-widest mb-6 pb-4 border-b border-gray-100">QUICK_ACTIONS</h3>
-                            <div class="grid grid-cols-2 gap-4">
+                            <h3 class="font-mono text-sm font-bold tracking-widest mb-6 pb-4 border-b border-gray-100">快捷操作</h3>
+                            <div class="grid grid-cols-2 xl:grid-cols-3 gap-4">
                                 <button onclick="window.triggerJob('fetch')" class="flex flex-col items-center justify-center p-5 border border-gray-200 hover:border-black hover:bg-gray-50 transition-all group">
                                     <i data-lucide="download-cloud" class="w-6 h-6 mb-3 text-gray-600 group-hover:text-black"></i>
-                                    <span class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-600 group-hover:text-black">Fetch RSOE</span>
+                                    <span class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-600 group-hover:text-black">抓取 RSOE</span>
                                 </button>
                                 <button onclick="window.triggerJob('pool')" class="flex flex-col items-center justify-center p-5 border border-gray-200 hover:border-black hover:bg-gray-50 transition-all group">
                                     <i data-lucide="play-circle" class="w-6 h-6 mb-3 text-gray-600 group-hover:text-black"></i>
-                                    <span class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-600 group-hover:text-black">Process Pool</span>
+                                    <span class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-600 group-hover:text-black">处理事件池</span>
                                 </button>
                                 <button onclick="window.triggerJob('recheck')" class="flex flex-col items-center justify-center p-5 border border-gray-200 hover:border-black hover:bg-gray-50 transition-all group">
                                     <i data-lucide="satellite-dish" class="w-6 h-6 mb-3 text-gray-600 group-hover:text-black"></i>
-                                    <span class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-600 group-hover:text-black">Recheck Imagery</span>
+                                    <span class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-600 group-hover:text-black">重查影像</span>
                                 </button>
                                 <button onclick="window.generateReport()" class="flex flex-col items-center justify-center p-5 border border-gray-200 hover:border-black hover:bg-gray-50 transition-all group">
                                     <i data-lucide="file-plus" class="w-6 h-6 mb-3 text-gray-600 group-hover:text-black"></i>
-                                    <span class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-600 group-hover:text-black">Gen Report</span>
+                                    <span class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-600 group-hover:text-black">生成日报</span>
                                 </button>
                                 <button onclick="window.triggerJob('unlock')" class="flex flex-col items-center justify-center p-5 border border-black bg-black text-white hover:bg-gray-800 transition-all shadow-[4px_4px_0_#e5e5e5] hover:shadow-[2px_2px_0_#d4d4d4] hover:translate-x-[2px] hover:translate-y-[2px]">
                                     <i data-lucide="unlock" class="w-6 h-6 mb-3"></i>
-                                    <span class="font-mono text-[10px] font-bold tracking-widest uppercase">Release Locks</span>
+                                    <span class="font-mono text-[10px] font-bold tracking-widest uppercase">释放锁</span>
                                 </button>
                                 <button onclick="window.switchView('pool')" class="flex flex-col items-center justify-center p-5 border border-gray-200 hover:border-black hover:bg-gray-50 transition-all group col-span-1">
                                     <i data-lucide="database" class="w-6 h-6 mb-3 text-gray-600 group-hover:text-black"></i>
-                                    <span class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-600 group-hover:text-black">View Pool</span>
+                                    <span class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-600 group-hover:text-black">查看事件池</span>
                                 </button>
                             </div>
                         </div>
@@ -244,7 +292,7 @@
 
                 <!-- Event Pool 视图 -->
                 <div class="hidden space-y-6" id="view-pool">
-                    <h2 class="font-mono text-2xl font-bold tracking-widest">EVENT_POOL</h2>
+                    <h2 class="font-mono text-2xl font-bold tracking-widest">事件池</h2>
 
                     <!-- 统计行 -->
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-4" id="pool-stats-row"></div>
@@ -253,10 +301,10 @@
                     <div class="tech-card p-0 overflow-hidden">
                         <div class="flex border-b border-gray-200 bg-gray-50">
                             <button id="pool-tab-raw" onclick="window.switchPoolTab('raw')" class="pool-tab px-6 py-4 font-mono text-xs font-bold tracking-widest uppercase border-b-2 border-black text-black transition-colors">
-                                <i data-lucide="server" class="w-3 h-3 inline-block mr-2"></i>Raw Pool
+                                <i data-lucide="server" class="w-3 h-3 inline-block mr-2"></i>原始池
                             </button>
                             <button id="pool-tab-track" onclick="window.switchPoolTab('track')" class="pool-tab px-6 py-4 font-mono text-xs font-bold tracking-widest uppercase border-b-2 border-transparent text-gray-500 hover:text-black transition-colors">
-                                <i data-lucide="satellite-dish" class="w-3 h-3 inline-block mr-2"></i>Processing Track
+                                <i data-lucide="satellite-dish" class="w-3 h-3 inline-block mr-2"></i>处理追踪
                             </button>
                         </div>
 
@@ -264,43 +312,44 @@
                         <div id="pool-panel-raw">
                             <div class="p-4 border-b border-gray-100 flex flex-wrap gap-3 items-end bg-white">
                                 <div>
-                                    <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">Category</div>
+                                    <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">类别</div>
                                     <select id="pool-filter-category" onchange="window.loadRawPool(1)" class="px-3 py-2 border border-gray-200 font-mono text-xs bg-white focus:outline-none focus:border-black">
-                                        <option value="">All</option>
+                                        <option value="">全部</option>
                                     </select>
                                 </div>
                                 <div>
-                                    <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">Severity</div>
+                                    <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">严重程度</div>
                                     <select id="pool-filter-severity" onchange="window.loadRawPool(1)" class="px-3 py-2 border border-gray-200 font-mono text-xs bg-white focus:outline-none focus:border-black">
-                                        <option value="">All</option>
-                                        <option>extreme</option><option>high</option><option>medium</option><option>low</option>
+                                        <option value="">全部</option>
+                                        <option value="extreme">极高</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option>
                                     </select>
                                 </div>
                                 <div>
-                                    <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">Country</div>
-                                    <input id="pool-filter-country" oninput="window.loadRawPool(1)" type="text" placeholder="Search..." class="px-3 py-2 border border-gray-200 font-mono text-xs focus:outline-none focus:border-black w-32">
+                                    <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">国家</div>
+                                    <input id="pool-filter-country" oninput="window.loadRawPool(1)" type="text" placeholder="搜索..." class="px-3 py-2 border border-gray-200 font-mono text-xs focus:outline-none focus:border-black w-32">
                                 </div>
                                 <div class="flex items-end gap-2">
                                     <label class="flex items-center gap-2 cursor-pointer font-mono text-xs text-gray-600">
                                         <input type="checkbox" id="pool-filter-active" onchange="window.loadRawPool(1)" checked class="w-3 h-3">
-                                        Active only
+                                        仅活跃
                                     </label>
                                 </div>
                                 <button onclick="window.loadRawPool(1)" class="ml-auto px-4 py-2 border border-gray-200 font-mono text-xs font-bold tracking-widest uppercase hover:bg-gray-100">
-                                    <i data-lucide="refresh-cw" class="w-3 h-3 inline-block mr-1"></i>REFRESH
+                                    <i data-lucide="refresh-cw" class="w-3 h-3 inline-block mr-1"></i>刷新
                                 </button>
                             </div>
-                            <div class="overflow-x-auto">
+                            <div class="overflow-x-auto admin-table-wrap">
                                 <table class="w-full">
                                     <thead>
                                         <tr class="border-b border-gray-100 bg-gray-50">
-                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Event ID</th>
-                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Title</th>
-                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Category</th>
-                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Country</th>
-                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Severity</th>
-                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Last Seen</th>
-                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Fetches</th>
+                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">事件 ID</th>
+                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">标题</th>
+                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">类别</th>
+                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">国家</th>
+                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">严重程度</th>
+                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">最后出现</th>
+                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">抓取次数</th>
+                                            <th class="py-3 px-4 text-right font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">操作</th>
                                         </tr>
                                     </thead>
                                     <tbody id="raw-pool-tbody" class="font-mono text-xs"></tbody>
@@ -313,39 +362,39 @@
                         <div id="pool-panel-track" class="hidden">
                             <div class="p-4 border-b border-gray-100 flex flex-wrap gap-3 items-end bg-white">
                                 <div>
-                                    <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">Status</div>
+                                    <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">状态</div>
                                     <select id="track-filter-status" onchange="window.loadTrack(1)" class="px-3 py-2 border border-gray-200 font-mono text-xs bg-white focus:outline-none focus:border-black">
-                                        <option value="">All</option>
-                                        <option>pending</option><option>pool</option><option>checked</option><option>queued</option><option>processing</option><option>completed</option>
+                                        <option value="">全部</option>
+                                        <option value="pending">待处理</option><option value="pool">事件池</option><option value="checked">已质检</option><option value="queued">已入队</option><option value="processing">处理中</option><option value="completed">已完成</option>
                                     </select>
                                 </div>
                                 <div>
-                                    <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">Severity</div>
+                                    <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">严重程度</div>
                                     <select id="track-filter-severity" onchange="window.loadTrack(1)" class="px-3 py-2 border border-gray-200 font-mono text-xs bg-white focus:outline-none focus:border-black">
-                                        <option value="">All</option>
-                                        <option>extreme</option><option>high</option><option>medium</option><option>low</option>
+                                        <option value="">全部</option>
+                                        <option value="extreme">极高</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option>
                                     </select>
                                 </div>
                                 <div class="flex items-end gap-2">
                                     <label class="flex items-center gap-2 cursor-pointer font-mono text-xs text-gray-600">
                                         <input type="checkbox" id="track-filter-imagery-open" onchange="window.loadTrack(1)" class="w-3 h-3">
-                                        Imagery tracking only
+                                        仅看影像追踪
                                     </label>
                                 </div>
                                 <button onclick="window.loadTrack(1)" class="ml-auto px-4 py-2 border border-gray-200 font-mono text-xs font-bold tracking-widest uppercase hover:bg-gray-100">
-                                    <i data-lucide="refresh-cw" class="w-3 h-3 inline-block mr-1"></i>REFRESH
+                                    <i data-lucide="refresh-cw" class="w-3 h-3 inline-block mr-1"></i>刷新
                                 </button>
                             </div>
-                            <div class="overflow-x-auto">
+                            <div class="overflow-x-auto admin-table-wrap">
                                 <table class="w-full">
                                     <thead>
                                         <tr class="border-b border-gray-100 bg-gray-50">
-                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Title</th>
-                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Country</th>
-                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Status</th>
-                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Imagery</th>
-                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Checks</th>
-                                            <th class="py-3 px-4 text-right font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Action</th>
+                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">标题</th>
+                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">国家</th>
+                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">状态</th>
+                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">影像</th>
+                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">检查次数</th>
+                                            <th class="py-3 px-4 text-right font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">操作</th>
                                         </tr>
                                     </thead>
                                     <tbody id="track-tbody" class="font-mono text-xs"></tbody>
@@ -358,51 +407,53 @@
 
                 <!-- Events 视图 -->
                 <div class="hidden space-y-6" id="view-events">
-                    <h2 class="font-mono text-2xl font-bold tracking-widest">EVENT_MANAGEMENT</h2>
+                    <h2 class="font-mono text-2xl font-bold tracking-widest">事件管理</h2>
 
                     <!-- 筛选栏 -->
                     <div class="flex flex-wrap gap-3 items-end">
                         <div>
-                            <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">Status</div>
+                            <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">状态</div>
                             <select id="ev-filter-status" onchange="window.loadEvents(1)" class="px-3 py-2 border border-gray-200 font-mono text-xs bg-white focus:outline-none focus:border-black">
-                                <option value="">All</option>
-                                <option>pending</option><option>pool</option><option>checked</option><option>queued</option><option>processing</option><option>completed</option>
+                                <option value="">全部</option>
+                                <option value="pending">待处理</option><option value="pool">事件池</option><option value="checked">已质检</option><option value="queued">已入队</option><option value="processing">处理中</option><option value="completed">已完成</option>
                             </select>
                         </div>
                         <div>
-                            <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">Severity</div>
+                            <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">严重程度</div>
                             <select id="ev-filter-severity" onchange="window.loadEvents(1)" class="px-3 py-2 border border-gray-200 font-mono text-xs bg-white focus:outline-none focus:border-black">
-                                <option value="">All</option>
-                                <option>extreme</option><option>high</option><option>medium</option><option>low</option>
+                                <option value="">全部</option>
+                                <option value="extreme">极高</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option>
                             </select>
                         </div>
                         <div>
-                            <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">Country</div>
-                            <input id="ev-filter-country" oninput="window.loadEvents(1)" type="text" placeholder="Search..." class="px-3 py-2 border border-gray-200 font-mono text-xs focus:outline-none focus:border-black w-32">
+                            <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">国家</div>
+                            <input id="ev-filter-country" oninput="window.loadEvents(1)" type="text" placeholder="搜索..." class="px-3 py-2 border border-gray-200 font-mono text-xs focus:outline-none focus:border-black w-32">
                         </div>
                         <div class="flex items-end gap-2">
                             <label class="flex items-center gap-2 cursor-pointer font-mono text-xs text-gray-600">
                                 <input type="checkbox" id="ev-filter-imagery-open" onchange="window.loadEvents(1)" class="w-3 h-3">
-                                Imagery tracking
+                                影像追踪
                             </label>
                         </div>
                         <button onclick="window.loadEvents(1)" class="ml-auto px-4 py-2 border border-gray-200 font-mono text-xs font-bold tracking-widest uppercase hover:bg-gray-100">
-                            <i data-lucide="refresh-cw" class="w-3 h-3 inline-block mr-1"></i>REFRESH
+                            <i data-lucide="refresh-cw" class="w-3 h-3 inline-block mr-1"></i>刷新
                         </button>
                     </div>
 
+                    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4" id="events-stats-row"></div>
+
                     <div class="tech-card p-0 overflow-hidden">
-                        <div class="overflow-x-auto">
+                        <div class="overflow-x-auto admin-table-wrap">
                             <table class="w-full">
                                 <thead>
                                     <tr class="border-b border-gray-100 bg-gray-50">
-                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Title</th>
-                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Country</th>
-                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Status</th>
-                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Severity</th>
-                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Imagery</th>
-                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Checks</th>
-                                        <th class="py-3 px-4 text-right font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Action</th>
+                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">标题</th>
+                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">国家</th>
+                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">状态</th>
+                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">严重程度</th>
+                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">影像</th>
+                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">检查次数</th>
+                                        <th class="py-3 px-4 text-right font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody id="events-tbody" class="font-mono text-xs"></tbody>
@@ -414,72 +465,109 @@
 
                 <!-- Products 视图 -->
                 <div class="hidden space-y-6" id="view-products">
-                    <h2 class="font-mono text-2xl font-bold tracking-widest">PRODUCTS</h2>
+                    <h2 class="font-mono text-2xl font-bold tracking-widest">成品池</h2>
+
+                    <div class="flex flex-wrap gap-3 items-end">
+                        <div>
+                            <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">摘要状态</div>
+                            <select id="prod-filter-summary" onchange="window.loadProducts(1)" class="px-3 py-2 border border-gray-200 font-mono text-xs bg-white focus:outline-none focus:border-black">
+                                <option value="">全部</option>
+                                <option value="true">已生成</option>
+                                <option value="false">未生成</option>
+                            </select>
+                        </div>
+                        <div>
+                            <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">类别</div>
+                            <input id="prod-filter-category" oninput="window.loadProducts(1)" type="text" placeholder="如 FL / EQ" class="px-3 py-2 border border-gray-200 font-mono text-xs focus:outline-none focus:border-black w-32">
+                        </div>
+                        <div>
+                            <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">国家</div>
+                            <input id="prod-filter-country" oninput="window.loadProducts(1)" type="text" placeholder="搜索..." class="px-3 py-2 border border-gray-200 font-mono text-xs focus:outline-none focus:border-black w-32">
+                        </div>
+                        <button onclick="window.loadProducts(1)" class="ml-auto px-4 py-2 border border-gray-200 font-mono text-xs font-bold tracking-widest uppercase hover:bg-gray-100">
+                            <i data-lucide="refresh-cw" class="w-3 h-3 inline-block mr-1"></i>刷新
+                        </button>
+                    </div>
+
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4" id="products-summary-row"></div>
                     
                     <div class="tech-card p-0 overflow-hidden">
-                        <div class="p-6 border-b border-gray-100 bg-white flex justify-between items-center">
-                            <h3 class="font-mono text-sm font-bold tracking-widest">PRODUCT_POOL</h3>
-                            <button onclick="window.loadProducts()" class="px-4 py-2 border border-gray-200 font-mono text-xs font-bold tracking-widest uppercase hover:bg-gray-100">
-                                <i data-lucide="refresh-cw" class="w-3 h-3 inline-block mr-1"></i>
-                                REFRESH
-                            </button>
+                        <div class="p-6 border-b border-gray-100 bg-white flex flex-col gap-3 md:flex-row md:justify-between md:items-center">
+                            <h3 class="font-mono text-sm font-bold tracking-widest">成品列表</h3>
+                            <div class="font-mono text-[10px] text-gray-400" id="products-count-hint">最新 50 条</div>
                         </div>
-                        <div class="overflow-x-auto">
+                        <div class="overflow-x-auto admin-table-wrap">
                             <table class="w-full">
                                 <thead>
                                     <tr class="border-b border-gray-100 bg-gray-50">
                                         <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">UUID</th>
-                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Event Title</th>
-                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Summary</th>
-                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Created</th>
+                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">事件标题</th>
+                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">类别</th>
+                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">国家</th>
+                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">摘要</th>
+                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">质评分</th>
+                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">创建时间</th>
+                                        <th class="py-4 px-6 text-right font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody id="products-tbody" class="font-mono text-xs"></tbody>
                             </table>
                         </div>
+                        <div class="p-4 border-t border-gray-100 flex items-center justify-between" id="products-pagination"></div>
                     </div>
                 </div>
 
                 <!-- Reports 视图 -->
                 <div class="hidden space-y-6" id="view-reports">
-                    <div class="flex justify-between items-center">
-                        <h2 class="font-mono text-2xl font-bold tracking-widest">DAILY_REPORTS</h2>
-                        <button onclick="window.generateReport()" class="px-6 py-3 bg-black text-white font-mono text-xs font-bold tracking-widest uppercase hover:bg-gray-800 shadow-[4px_4px_0_#d4d4d4] hover:shadow-[2px_2px_0_#d4d4d4] hover:translate-x-[2px] hover:translate-y-[2px]">
-                            GENERATE_REPORT
-                        </button>
-                    </div>
-                    
-                    <div class="tech-card p-0 overflow-hidden">
-                        <div class="p-6 border-b border-gray-100 bg-white flex justify-between items-center">
-                            <h3 class="font-mono text-sm font-bold tracking-widest">REPORT_ARCHIVE</h3>
-                            <button onclick="window.loadReports()" class="px-4 py-2 border border-gray-200 font-mono text-xs font-bold tracking-widest uppercase hover:bg-gray-100">
-                                <i data-lucide="refresh-cw" class="w-3 h-3 inline-block mr-1"></i>
-                                REFRESH
+                    <div class="flex flex-col gap-4 xl:flex-row xl:justify-between xl:items-center">
+                        <h2 class="font-mono text-2xl font-bold tracking-widest">灾害日报</h2>
+                        <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                            <input id="report-generate-date" type="date" class="px-3 py-3 border border-gray-200 font-mono text-xs bg-white focus:outline-none focus:border-black">
+                            <button onclick="window.generateReport()" class="px-6 py-3 bg-black text-white font-mono text-xs font-bold tracking-widest uppercase hover:bg-gray-800 shadow-[4px_4px_0_#d4d4d4] hover:shadow-[2px_2px_0_#d4d4d4] hover:translate-x-[2px] hover:translate-y-[2px]">
+                                生成日报
                             </button>
                         </div>
-                        <div class="overflow-x-auto">
+                    </div>
+
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4" id="reports-summary-row"></div>
+                    
+                    <div class="tech-card p-0 overflow-hidden">
+                        <div class="p-6 border-b border-gray-100 bg-white flex flex-col gap-3 md:flex-row md:justify-between md:items-center">
+                            <h3 class="font-mono text-sm font-bold tracking-widest">日报归档</h3>
+                            <button onclick="window.loadReports()" class="px-4 py-2 border border-gray-200 font-mono text-xs font-bold tracking-widest uppercase hover:bg-gray-100">
+                                <i data-lucide="refresh-cw" class="w-3 h-3 inline-block mr-1"></i>
+                                刷新
+                            </button>
+                        </div>
+                        <div class="overflow-x-auto admin-table-wrap">
                             <table class="w-full">
                                 <thead>
                                     <tr class="border-b border-gray-100 bg-gray-50">
-                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Date</th>
-                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Event Count</th>
-                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Status</th>
-                                        <th class="py-4 px-6 text-right font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Action</th>
+                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">日期</th>
+                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">标题</th>
+                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">事件数量</th>
+                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">生成时间</th>
+                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">状态</th>
+                                        <th class="py-4 px-6 text-right font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody id="reports-tbody" class="font-mono text-xs"></tbody>
                             </table>
                         </div>
+                        <div class="p-4 border-t border-gray-100 flex items-center justify-between" id="reports-pagination"></div>
                     </div>
                 </div>
 
                 <!-- Settings 视图 -->
                 <div class="hidden space-y-6" id="view-settings">
-                    <div class="flex justify-between items-center">
-                        <h2 class="font-mono text-2xl font-bold tracking-widest">SYSTEM_SETTINGS</h2>
-                        <div class="flex gap-3">
+                    <div class="flex flex-col gap-4 xl:flex-row xl:justify-between xl:items-center">
+                        <h2 class="font-mono text-2xl font-bold tracking-widest">系统配置</h2>
+                        <div class="flex flex-col sm:flex-row gap-3">
+                            <button onclick="window.saveAllSettings()" class="px-4 py-2 bg-black text-white font-mono text-xs font-bold tracking-widest uppercase hover:bg-gray-800">
+                                保存全部
+                            </button>
                             <button onclick="window.loadSettings()" class="px-4 py-2 border border-gray-200 font-mono text-xs font-bold tracking-widest uppercase hover:bg-gray-100">
-                                <i data-lucide="refresh-cw" class="w-3 h-3 inline-block mr-1"></i>RELOAD
+                                <i data-lucide="refresh-cw" class="w-3 h-3 inline-block mr-1"></i>重新加载
                             </button>
                         </div>
                     </div>
@@ -490,7 +578,7 @@
                         <div class="p-5 border-b border-gray-100 bg-gray-50 flex justify-between items-center cursor-pointer" onclick="window.toggleSection('sec-api-keys')">
                             <div class="flex items-center gap-3">
                                 <i data-lucide="zap" class="w-4 h-4"></i>
-                                <span class="font-mono text-sm font-bold tracking-widest">API_KEYS</span>
+                                <span class="font-mono text-sm font-bold tracking-widest">接口密钥</span>
                                 <span class="font-mono text-[10px] text-gray-400">OpenAI · Gemini</span>
                             </div>
                             <i data-lucide="chevron-down" class="w-4 h-4 transition-transform" id="chevron-sec-api-keys"></i>
@@ -504,7 +592,7 @@
                             <div class="settings-field"><label class="sfield-label">GEMINI_FLASH_MODEL</label><input class="sfield-input" data-key="gemini_flash_model" type="text" placeholder="gemini-2.0-flash"></div>
                             <div class="settings-field"><label class="sfield-label">GEMINI_PRO_MODEL</label><input class="sfield-input" data-key="gemini_pro_model" type="text" placeholder="gemini-2.5-pro-..."></div>
                             <div class="md:col-span-2 flex justify-end pt-2">
-                                <button onclick="window.saveSettingsGroup('sec-api-keys')" class="settings-save-btn">SAVE API_KEYS</button>
+                                <button onclick="window.saveSettingsGroup('sec-api-keys')" class="settings-save-btn">保存接口配置</button>
                             </div>
                         </div>
                     </div>
@@ -514,7 +602,7 @@
                         <div class="p-5 border-b border-gray-100 bg-gray-50 flex justify-between items-center cursor-pointer" onclick="window.toggleSection('sec-rsoe')">
                             <div class="flex items-center gap-3">
                                 <i data-lucide="cookie" class="w-4 h-4"></i>
-                                <span class="font-mono text-sm font-bold tracking-widest">RSOE_COOKIES</span>
+                                <span class="font-mono text-sm font-bold tracking-widest">RSOE Cookie</span>
                                 <span class="font-mono text-[10px] text-gray-400">从浏览器 DevTools 粘贴</span>
                             </div>
                             <i data-lucide="chevron-down" class="w-4 h-4 transition-transform" id="chevron-sec-rsoe"></i>
@@ -529,7 +617,7 @@
                             <div class="settings-field"><label class="sfield-label">__EOI</label><input class="sfield-input" data-key="eoi" type="text"></div>
                             <div class="settings-field"><label class="sfield-label">_GA_KHD7YP5VHW</label><input class="sfield-input" data-key="ga_kh" type="text"></div>
                             <div class="md:col-span-2 flex justify-end pt-2">
-                                <button onclick="window.saveSettingsGroup('sec-rsoe')" class="settings-save-btn">SAVE RSOE_COOKIES</button>
+                                <button onclick="window.saveSettingsGroup('sec-rsoe')" class="settings-save-btn">保存 RSOE 配置</button>
                             </div>
                         </div>
                     </div>
@@ -539,21 +627,21 @@
                         <div class="p-5 border-b border-gray-100 bg-gray-50 flex justify-between items-center cursor-pointer" onclick="window.toggleSection('sec-gee')">
                             <div class="flex items-center gap-3">
                                 <i data-lucide="satellite" class="w-4 h-4"></i>
-                                <span class="font-mono text-sm font-bold tracking-widest">GEE_CONFIG</span>
+                                <span class="font-mono text-sm font-bold tracking-widest">GEE 配置</span>
                                 <span class="font-mono text-[10px] text-gray-400">Google Earth Engine</span>
                             </div>
                             <i data-lucide="chevron-down" class="w-4 h-4 transition-transform" id="chevron-sec-gee"></i>
                         </div>
                         <div id="sec-gee" class="hidden p-6 grid grid-cols-1 md:grid-cols-2 gap-5">
                             <div class="settings-field"><label class="sfield-label">GEE_PROJECT_ID</label><input class="sfield-input" data-key="gee_project_id" type="text"></div>
-                            <div class="settings-field"><label class="sfield-label">SERVICE_ACCOUNT_EMAIL</label><input class="sfield-input" data-key="gee_service_account_email" type="text"></div>
-                            <div class="settings-field"><label class="sfield-label">CLOUD_THRESHOLD (%)</label><input class="sfield-input" data-key="gee_cloud_threshold" type="number" min="0" max="100"></div>
-                            <div class="settings-field"><label class="sfield-label">TIME_WINDOW_BEFORE (days)</label><input class="sfield-input" data-key="gee_time_before" type="number" min="1" max="365"></div>
-                            <div class="settings-field"><label class="sfield-label">TIME_WINDOW_AFTER (days)</label><input class="sfield-input" data-key="gee_time_after" type="number" min="1" max="365"></div>
-                            <div class="settings-field"><label class="sfield-label">RESOLUTION (m/px)</label><input class="sfield-input" data-key="gee_scale" type="number" min="1"></div>
-                            <div class="settings-field"><label class="sfield-label">MAX_CONCURRENT_TASKS</label><input class="sfield-input" data-key="gee_max_concurrent" type="number" min="1" max="20"></div>
+                            <div class="settings-field"><label class="sfield-label">服务账号邮箱</label><input class="sfield-input" data-key="gee_service_account_email" type="text"></div>
+                            <div class="settings-field"><label class="sfield-label">云量阈值 (%)</label><input class="sfield-input" data-key="gee_cloud_threshold" type="number" min="0" max="100"></div>
+                            <div class="settings-field"><label class="sfield-label">灾前窗口 (天)</label><input class="sfield-input" data-key="gee_time_before" type="number" min="1" max="365"></div>
+                            <div class="settings-field"><label class="sfield-label">灾后窗口 (天)</label><input class="sfield-input" data-key="gee_time_after" type="number" min="1" max="365"></div>
+                            <div class="settings-field"><label class="sfield-label">分辨率 (m/px)</label><input class="sfield-input" data-key="gee_scale" type="number" min="1"></div>
+                            <div class="settings-field"><label class="sfield-label">最大并发任务</label><input class="sfield-input" data-key="gee_max_concurrent" type="number" min="1" max="20"></div>
                             <div class="md:col-span-2 flex justify-end pt-2">
-                                <button onclick="window.saveSettingsGroup('sec-gee')" class="settings-save-btn">SAVE GEE_CONFIG</button>
+                                <button onclick="window.saveSettingsGroup('sec-gee')" class="settings-save-btn">保存 GEE 配置</button>
                             </div>
                         </div>
                     </div>
@@ -563,22 +651,22 @@
                         <div class="p-5 border-b border-gray-100 bg-gray-50 flex justify-between items-center cursor-pointer" onclick="window.toggleSection('sec-quality')">
                             <div class="flex items-center gap-3">
                                 <i data-lucide="scan-eye" class="w-4 h-4"></i>
-                                <span class="font-mono text-sm font-bold tracking-widest">QUALITY_ASSESSMENT</span>
+                                <span class="font-mono text-sm font-bold tracking-widest">质量评估</span>
                             </div>
                             <i data-lucide="chevron-down" class="w-4 h-4 transition-transform" id="chevron-sec-quality"></i>
                         </div>
                         <div id="sec-quality" class="hidden p-6 grid grid-cols-1 md:grid-cols-2 gap-5">
-                            <div class="settings-field"><label class="sfield-label">ENABLED</label>
-                                <select class="sfield-input" data-key="quality_enabled"><option value="true">true</option><option value="false">false</option></select>
+                            <div class="settings-field"><label class="sfield-label">启用</label>
+                                <select class="sfield-input" data-key="quality_enabled"><option value="true">开启</option><option value="false">关闭</option></select>
                             </div>
                             <div class="settings-field"><label class="sfield-label">FAIL_OPEN (强制放行)</label>
-                                <select class="sfield-input" data-key="quality_fail_open"><option value="true">true</option><option value="false">false</option></select>
+                                <select class="sfield-input" data-key="quality_fail_open"><option value="true">开启</option><option value="false">关闭</option></select>
                             </div>
-                            <div class="settings-field"><label class="sfield-label">CLOUD_COVERAGE_THRESHOLD (%)</label><input class="sfield-input" data-key="quality_cloud_threshold" type="number" min="0" max="100"></div>
-                            <div class="settings-field"><label class="sfield-label">PASS_SCORE_THRESHOLD</label><input class="sfield-input" data-key="quality_pass_score" type="number" min="0" max="100"></div>
-                            <div class="settings-field"><label class="sfield-label">MAX_RETRIES</label><input class="sfield-input" data-key="quality_max_retries" type="number" min="0" max="10"></div>
+                            <div class="settings-field"><label class="sfield-label">云量阈值 (%)</label><input class="sfield-input" data-key="quality_cloud_threshold" type="number" min="0" max="100"></div>
+                            <div class="settings-field"><label class="sfield-label">通过分数阈值</label><input class="sfield-input" data-key="quality_pass_score" type="number" min="0" max="100"></div>
+                            <div class="settings-field"><label class="sfield-label">最大重试次数</label><input class="sfield-input" data-key="quality_max_retries" type="number" min="0" max="10"></div>
                             <div class="md:col-span-2 flex justify-end pt-2">
-                                <button onclick="window.saveSettingsGroup('sec-quality')" class="settings-save-btn">SAVE QUALITY</button>
+                                <button onclick="window.saveSettingsGroup('sec-quality')" class="settings-save-btn">保存质检配置</button>
                             </div>
                         </div>
                     </div>
@@ -588,25 +676,25 @@
                         <div class="p-5 border-b border-gray-100 bg-gray-50 flex justify-between items-center cursor-pointer" onclick="window.toggleSection('sec-scheduler')">
                             <div class="flex items-center gap-3">
                                 <i data-lucide="timer" class="w-4 h-4"></i>
-                                <span class="font-mono text-sm font-bold tracking-widest">SCHEDULER</span>
+                                <span class="font-mono text-sm font-bold tracking-widest">调度器</span>
                             </div>
                             <i data-lucide="chevron-down" class="w-4 h-4 transition-transform" id="chevron-sec-scheduler"></i>
                         </div>
                         <div id="sec-scheduler" class="hidden p-6 grid grid-cols-1 md:grid-cols-3 gap-5">
                             <div class="settings-field"><label class="sfield-label">FETCH_RSOE (每12小时)</label>
-                                <select class="sfield-input" data-key="sched_fetch_enabled"><option value="true">enabled</option><option value="false">disabled</option></select>
+                                <select class="sfield-input" data-key="sched_fetch_enabled"><option value="true">启用</option><option value="false">禁用</option></select>
                             </div>
                             <div class="settings-field"><label class="sfield-label">PROCESS_POOL (每小时)</label>
-                                <select class="sfield-input" data-key="sched_pool_enabled"><option value="true">enabled</option><option value="false">disabled</option></select>
+                                <select class="sfield-input" data-key="sched_pool_enabled"><option value="true">启用</option><option value="false">禁用</option></select>
                             </div>
                             <div class="settings-field"><label class="sfield-label">RECHECK_IMAGERY (每小时)</label>
-                                <select class="sfield-input" data-key="sched_recheck_enabled"><option value="true">enabled</option><option value="false">disabled</option></select>
+                                <select class="sfield-input" data-key="sched_recheck_enabled"><option value="true">启用</option><option value="false">禁用</option></select>
                             </div>
                             <div class="settings-field"><label class="sfield-label">DAILY_REPORT (每日7:00)</label>
-                                <select class="sfield-input" data-key="sched_report_enabled"><option value="true">enabled</option><option value="false">disabled</option></select>
+                                <select class="sfield-input" data-key="sched_report_enabled"><option value="true">启用</option><option value="false">禁用</option></select>
                             </div>
                             <div class="md:col-span-3 flex justify-end pt-2">
-                                <button onclick="window.saveSettingsGroup('sec-scheduler')" class="settings-save-btn">SAVE SCHEDULER</button>
+                                <button onclick="window.saveSettingsGroup('sec-scheduler')" class="settings-save-btn">保存调度配置</button>
                             </div>
                         </div>
                     </div>
@@ -616,24 +704,24 @@
                         <div class="p-5 border-b border-gray-100 bg-gray-50 flex justify-between items-center cursor-pointer" onclick="window.toggleSection('sec-server')">
                             <div class="flex items-center gap-3">
                                 <i data-lucide="server" class="w-4 h-4"></i>
-                                <span class="font-mono text-sm font-bold tracking-widest">SERVER_&amp;_RSOE</span>
+                                <span class="font-mono text-sm font-bold tracking-widest">服务与 RSOE</span>
                             </div>
                             <i data-lucide="chevron-down" class="w-4 h-4 transition-transform" id="chevron-sec-server"></i>
                         </div>
                         <div id="sec-server" class="hidden p-6 grid grid-cols-1 md:grid-cols-2 gap-5">
-                            <div class="settings-field"><label class="sfield-label">REQUEST_TIMEOUT (s)</label><input class="sfield-input" data-key="request_timeout" type="number" min="1"></div>
-                            <div class="settings-field"><label class="sfield-label">REQUEST_DELAY (s)</label><input class="sfield-input" data-key="request_delay" type="number" step="0.1" min="0"></div>
-                            <div class="settings-field"><label class="sfield-label">RSOE_TIMEOUT (s)</label><input class="sfield-input" data-key="rsoe_request_timeout" type="number" min="1"></div>
-                            <div class="settings-field"><label class="sfield-label">RSOE_DELAY (s)</label><input class="sfield-input" data-key="rsoe_request_delay" type="number" step="0.1" min="0"></div>
-                            <div class="settings-field"><label class="sfield-label">RSOE_MAX_RETRIES</label><input class="sfield-input" data-key="rsoe_max_retries" type="number" min="0" max="10"></div>
-                            <div class="settings-field"><label class="sfield-label">LOG_LEVEL</label>
+                            <div class="settings-field"><label class="sfield-label">请求超时 (秒)</label><input class="sfield-input" data-key="request_timeout" type="number" min="1"></div>
+                            <div class="settings-field"><label class="sfield-label">请求间隔 (秒)</label><input class="sfield-input" data-key="request_delay" type="number" step="0.1" min="0"></div>
+                            <div class="settings-field"><label class="sfield-label">RSOE 超时 (秒)</label><input class="sfield-input" data-key="rsoe_request_timeout" type="number" min="1"></div>
+                            <div class="settings-field"><label class="sfield-label">RSOE 间隔 (秒)</label><input class="sfield-input" data-key="rsoe_request_delay" type="number" step="0.1" min="0"></div>
+                            <div class="settings-field"><label class="sfield-label">RSOE 最大重试</label><input class="sfield-input" data-key="rsoe_max_retries" type="number" min="0" max="10"></div>
+                            <div class="settings-field"><label class="sfield-label">日志级别</label>
                                 <select class="sfield-input" data-key="log_level">
                                     <option>DEBUG</option><option>INFO</option><option>WARNING</option><option>ERROR</option>
                                 </select>
                             </div>
                             <div class="md:col-span-2 settings-field"><label class="sfield-label">CORS_ORIGINS (逗号分隔)</label><input class="sfield-input" data-key="cors_origins" type="text"></div>
                             <div class="md:col-span-2 flex justify-end pt-2">
-                                <button onclick="window.saveSettingsGroup('sec-server')" class="settings-save-btn">SAVE SERVER</button>
+                                <button onclick="window.saveSettingsGroup('sec-server')" class="settings-save-btn">保存服务配置</button>
                             </div>
                         </div>
                     </div>
@@ -643,15 +731,15 @@
                         <div class="p-5 border-b border-gray-100 bg-gray-50 flex justify-between items-center cursor-pointer" onclick="window.toggleSection('sec-report')">
                             <div class="flex items-center gap-3">
                                 <i data-lucide="file-text" class="w-4 h-4"></i>
-                                <span class="font-mono text-sm font-bold tracking-widest">REPORT_GENERATION</span>
+                                <span class="font-mono text-sm font-bold tracking-widest">日报生成</span>
                             </div>
                             <i data-lucide="chevron-down" class="w-4 h-4 transition-transform" id="chevron-sec-report"></i>
                         </div>
                         <div id="sec-report" class="hidden p-6 grid grid-cols-1 md:grid-cols-2 gap-5">
-                            <div class="settings-field"><label class="sfield-label">TOP_EVENTS_COUNT</label><input class="sfield-input" data-key="report_top_events" type="number" min="1" max="20"></div>
-                            <div class="settings-field"><label class="sfield-label">MAX_SUMMARY_LENGTH (chars)</label><input class="sfield-input" data-key="report_max_summary_len" type="number" min="100" max="2000"></div>
+                            <div class="settings-field"><label class="sfield-label">入选事件数</label><input class="sfield-input" data-key="report_top_events" type="number" min="1" max="20"></div>
+                            <div class="settings-field"><label class="sfield-label">摘要最大长度 (字符)</label><input class="sfield-input" data-key="report_max_summary_len" type="number" min="100" max="2000"></div>
                             <div class="md:col-span-2 flex justify-end pt-2">
-                                <button onclick="window.saveSettingsGroup('sec-report')" class="settings-save-btn">SAVE REPORT</button>
+                                <button onclick="window.saveSettingsGroup('sec-report')" class="settings-save-btn">保存日报配置</button>
                             </div>
                         </div>
                     </div>
@@ -659,23 +747,48 @@
 
                 <!-- Tokens 视图 -->
                 <div class="hidden space-y-6" id="view-tokens">
-                    <h2 class="font-mono text-2xl font-bold tracking-widest">API_TOKENS</h2>
-                    
-                    <div class="tech-card p-0 overflow-hidden">
-                        <div class="p-6 border-b border-gray-100 bg-white flex justify-between items-center">
-                            <h3 class="font-mono text-sm font-bold tracking-widest">TOKEN_MANAGEMENT</h3>
-                            <button onclick="window.loadTokens()" class="px-4 py-2 border border-gray-200 font-mono text-xs font-bold tracking-widest uppercase hover:bg-gray-100">
-                                <i data-lucide="refresh-cw" class="w-3 h-3 inline-block mr-1"></i>
-                                REFRESH
+                    <h2 class="font-mono text-2xl font-bold tracking-widest">API 令牌</h2>
+
+                    <div class="tech-card p-6">
+                        <div class="grid grid-cols-1 md:grid-cols-[1.1fr_1.4fr_1fr_auto] gap-4 items-end">
+                            <div>
+                                <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">名称</div>
+                                <input id="token-name" type="text" placeholder="worker-token" class="w-full px-3 py-2 border border-gray-200 font-mono text-xs focus:outline-none focus:border-black">
+                            </div>
+                            <div>
+                                <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">说明</div>
+                                <input id="token-description" type="text" placeholder="例如：GPU 服务器访问令牌" class="w-full px-3 py-2 border border-gray-200 font-mono text-xs focus:outline-none focus:border-black">
+                            </div>
+                            <div>
+                                <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">权限</div>
+                                <input id="token-scopes" type="text" value="tasks.read,tasks.update" class="w-full px-3 py-2 border border-gray-200 font-mono text-xs focus:outline-none focus:border-black">
+                            </div>
+                            <button onclick="window.createToken()" class="px-5 py-2.5 bg-black text-white font-mono text-xs font-bold tracking-widest uppercase hover:bg-gray-800">
+                                创建令牌
                             </button>
                         </div>
-                        <div class="overflow-x-auto">
+                    </div>
+                    
+                    <div class="tech-card p-0 overflow-hidden">
+                        <div class="p-6 border-b border-gray-100 bg-white flex flex-col gap-3 md:flex-row md:justify-between md:items-center">
+                            <h3 class="font-mono text-sm font-bold tracking-widest">令牌管理</h3>
+                            <button onclick="window.loadTokens()" class="px-4 py-2 border border-gray-200 font-mono text-xs font-bold tracking-widest uppercase hover:bg-gray-100">
+                                <i data-lucide="refresh-cw" class="w-3 h-3 inline-block mr-1"></i>
+                                刷新
+                            </button>
+                        </div>
+                        <div class="overflow-x-auto admin-table-wrap">
                             <table class="w-full">
                                 <thead>
                                     <tr class="border-b border-gray-100 bg-gray-50">
-                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Name</th>
-                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Status</th>
-                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Created</th>
+                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">令牌</th>
+                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">名称</th>
+                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">说明</th>
+                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">状态</th>
+                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">使用次数</th>
+                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">最近使用</th>
+                                        <th class="py-4 px-6 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">创建时间</th>
+                                        <th class="py-4 px-6 text-right font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody id="tokens-tbody" class="font-mono text-xs"></tbody>
@@ -695,8 +808,8 @@
     <div class="hidden fixed inset-0 flex items-center justify-center bg-white/80 backdrop-blur-sm z-[9999]" id="loading">
         <div class="w-[420px] max-w-[calc(100vw-3rem)] bg-white border border-gray-200 p-5 shadow-[4px_4px_0_#d4d4d4]">
             <div class="flex justify-between items-center mb-3 font-mono text-[10px] font-bold tracking-[0.12em] uppercase text-gray-600">
-                <span>SYSTEM_PROCESSING</span>
-                <span>WAIT</span>
+                <span>系统处理中</span>
+                <span>请稍候</span>
             </div>
             <div class="h-2 border border-gray-200 bg-white overflow-hidden relative">
                 <div class="w-[36%] h-full bg-black loading-bar-anim"></div>

@@ -224,6 +224,13 @@ def trigger_process(
     if not event:
         raise HTTPException(status_code=404, detail="事件不存在")
 
+    processable_statuses = {"pending", "pool", "checked"}
+    if event.status not in processable_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"当前状态 {event.status} 不支持手动推进",
+        )
+
     def _run():
         from core.pool_manager import PoolManager
         from models.models import get_session_factory
