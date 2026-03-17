@@ -161,6 +161,33 @@ class ApiToken(Base):
     created_by = Column(Integer)
 
 
+class EventPool(Base):
+    """全局事件池 - 所有爬取到的事件去重后的总池"""
+    __tablename__ = "event_pool"
+
+    event_id = Column(Integer, primary_key=True)
+    sub_id = Column(Integer, primary_key=True, default=0)
+    title = Column(Text, nullable=False)
+    category = Column(Text)
+    category_name = Column(Text)
+    country = Column(Text)
+    continent = Column(Text)
+    severity = Column(Text)
+    longitude = Column(Float)
+    latitude = Column(Float)
+    address = Column(Text)
+    event_date = Column(Integer)
+    last_update = Column(Integer)
+    details_json = Column(Text)
+    source_url = Column(Text)
+    first_seen = Column(Integer, nullable=False)
+    last_seen = Column(Integer, nullable=False)
+    fetch_count = Column(Integer, default=1)
+    is_active = Column(Integer, default=1)
+    deactivated_at = Column(Integer)
+    related_uuid = Column(Text)
+
+
 # ──────────────────────────────────────────
 # 数据库会话工厂
 # ──────────────────────────────────────────
@@ -178,13 +205,17 @@ def get_engine(db_url: str = None):
         Path(db_url.replace("sqlite:///", "")).parent.mkdir(parents=True, exist_ok=True)
         _engine = create_engine(
             db_url,
-            connect_args={"check_same_thread": False},
+            connect_args={
+                "check_same_thread": False,
+                "timeout": 30,          # 写锁等待 30s，而不是立即报 "database is locked"
+            },
             echo=False,
         )
         # 启用 WAL 模式提升并发性能
         @event.listens_for(_engine, "connect")
         def set_wal(dbapi_conn, _):
             dbapi_conn.execute("PRAGMA journal_mode=WAL")
+            dbapi_conn.execute("PRAGMA synchronous=NORMAL")  # WAL 下 NORMAL 足够安全且更快
             dbapi_conn.execute("PRAGMA foreign_keys=ON")
     return _engine
 

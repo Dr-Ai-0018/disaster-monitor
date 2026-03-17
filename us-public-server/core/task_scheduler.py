@@ -3,13 +3,18 @@
 """
 import uuid
 import json
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from config.settings import settings
 from utils.logger import get_logger
+
+PROCESS_PENDING_LIMIT = 5
+PROCESS_GEE_LIMIT = 5
+PROCESS_ASSESS_LIMIT = 5
+PROCESS_ENQUEUE_LIMIT = 5
 
 logger = get_logger(__name__)
 
@@ -19,21 +24,17 @@ scheduler = BackgroundScheduler(timezone="UTC")
 # ── 任务函数 ──────────────────────────────────────────
 
 def job_fetch_rsoe():
-    """抓取 RSOE 数据并写入数据库"""
+    """抓取 RSOE 数据并写入数据库和全局事件池"""
     logger.info("⏰ [定时] 开始抓取 RSOE 数据...")
     from core.rsoe_spider import RsoeSpider
+    from core.event_pool_manager import EventPoolManager
     from models.models import Event, get_session_factory
     from datetime import timezone
 
     spider = RsoeSpider()
-    html_path = spider.fetch_event_list()
-    if not html_path:
-        logger.error("RSOE 抓取失败")
-        return
-
-    events_raw = spider.parse_event_list(html_path)
+    events_raw = spider.fetch_event_list()
     if not events_raw:
-        logger.warning("解析到 0 个事件")
+        logger.error("RSOE 抓取失败")
         return
 
     SessionLocal = get_session_factory()
@@ -42,6 +43,12 @@ def job_fetch_rsoe():
     new_count = 0
 
     try:
+        # 1. 先同步到全局事件池（去重）
+        pool_mgr = EventPoolManager(db)
+        pool_stats = pool_mgr.sync_events_to_pool(events_raw)
+        logger.info(f"事件池更新: {pool_stats}")
+
+        # 2. 再写入Events表（用于处理流程）
         for ev in events_raw:
             existing = db.query(Event).filter(
                 Event.event_id == ev["event_id"],
@@ -53,6 +60,27 @@ def job_fetch_rsoe():
                 if ev.get("last_update") and ev["last_update"] != existing.last_update:
                     existing.last_update = ev["last_update"]
                     existing.updated_at = now
+                if ev.get("severity") and ev["severity"] != existing.severity:
+                    existing.severity = ev["severity"]
+                    existing.updated_at = now
+                if ev.get("title"):
+                    existing.title = ev["title"]
+                if ev.get("category"):
+                    existing.category = ev["category"]
+                if ev.get("category_name"):
+                    existing.category_name = ev["category_name"]
+                if ev.get("country"):
+                    existing.country = ev["country"]
+                if ev.get("continent"):
+                    existing.continent = ev["continent"]
+                if ev.get("source_url"):
+                    existing.source_url = ev["source_url"]
+                if ev.get("event_date"):
+                    existing.event_date = ev["event_date"]
+                if ev.get("longitude") is not None:
+                    existing.longitude = ev["longitude"]
+                if ev.get("latitude") is not None:
+                    existing.latitude = ev["latitude"]
                 continue
 
             event = Event(
@@ -63,7 +91,10 @@ def job_fetch_rsoe():
                 category=ev.get("category"),
                 category_name=ev.get("category_name"),
                 country=ev.get("country"),
+                continent=ev.get("continent"),
                 severity=ev.get("severity", "medium"),
+                longitude=ev.get("longitude"),
+                latitude=ev.get("latitude"),
                 event_date=ev.get("event_date"),
                 last_update=ev.get("last_update"),
                 source_url=ev.get("source_url"),
@@ -75,7 +106,7 @@ def job_fetch_rsoe():
             new_count += 1
 
         db.commit()
-        logger.info(f"RSOE 抓取完成: 新增 {new_count} 个事件，共 {len(events_raw)} 个")
+        logger.info(f"RSOE 抓取完成: 新增 {new_count} 个事件到处理队列，共 {len(events_raw)} 个")
     except Exception as e:
         db.rollback()
         logger.error(f"RSOE 数据写入失败: {e}")
@@ -87,17 +118,24 @@ def job_process_pool():
     """推进蓄水池：pending→pool→checked→queued"""
     logger.info("⏰ [定时] 处理蓄水池...")
     from core.pool_manager import PoolManager
+    from core.event_pool_manager import EventPoolManager
     from models.models import get_session_factory
 
     SessionLocal = get_session_factory()
     db = SessionLocal()
     try:
         pm = PoolManager(db)
-        p1 = pm.process_pending_events(limit=30)
-        p2 = pm.submit_gee_tasks_for_pool(limit=20)
-        p3 = pm.assess_ready_events(limit=20)
-        p4 = pm.enqueue_checked_events(limit=50)
+        p1 = pm.process_pending_events(limit=PROCESS_PENDING_LIMIT)
+        p2 = pm.submit_gee_tasks_for_pool(limit=PROCESS_GEE_LIMIT)
+        p3 = pm.assess_ready_events(limit=PROCESS_ASSESS_LIMIT)
+        p4 = pm.enqueue_checked_events(limit=PROCESS_ENQUEUE_LIMIT)
         logger.info(f"蓄水池处理完成: pending→pool={p1}, GEE任务={p2}, 质量评估={p3}, 入队={p4}")
+        
+        # 维护全局事件池
+        epm = EventPoolManager(db)
+        deactivated = epm.deactivate_stale_events(days_threshold=30)
+        if deactivated > 0:
+            logger.info(f"全局池维护: 标记 {deactivated} 个过期事件")
     except Exception as e:
         logger.error(f"蓄水池处理失败: {e}")
     finally:
@@ -152,14 +190,18 @@ def setup_scheduler():
     """注册所有定时任务"""
     sched_cfg = settings.SCHEDULER_CONFIG
 
-    # 每天凌晨 2:00 抓取 RSOE 数据
-    if sched_cfg.get("fetch_rsoe_data", {}).get("enabled", True):
+    # 每天凌晨 2:00 抓取 RSOE 数据（run_on_startup=true 时启动后立即执行一次）
+    fetch_cfg = sched_cfg.get("fetch_rsoe_data", {})
+    if fetch_cfg.get("enabled", True):
+        run_on_startup = fetch_cfg.get("run_on_startup", False)
+        next_run = datetime.now(timezone.utc) if run_on_startup else None
         scheduler.add_job(
             job_fetch_rsoe,
             CronTrigger(hour=2, minute=0),
             id="fetch_rsoe_data",
             replace_existing=True,
             misfire_grace_time=3600,
+            next_run_time=next_run,
         )
 
     # 每小时处理蓄水池

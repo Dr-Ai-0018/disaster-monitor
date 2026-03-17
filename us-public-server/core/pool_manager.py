@@ -10,7 +10,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from config.settings import settings
-from models.models import Event, GeeTask, TaskQueue
+from models.models import Event, GeeTask, TaskQueue, EventPool
 from core.gee_manager import GeeManager
 from core.quality_assessor import QualityAssessor
 from utils.logger import get_logger
@@ -59,7 +59,9 @@ class PoolManager:
     def process_pending_events(self, limit: int = 50) -> int:
         """批量处理 pending 事件，获取坐标后转为 pool"""
         from core.rsoe_spider import RsoeSpider
+        from core.event_pool_manager import EventPoolManager
         spider = RsoeSpider()
+        epm = EventPoolManager(self.db)
 
         events = (
             self.db.query(Event)
@@ -67,33 +69,79 @@ class PoolManager:
             .limit(limit)
             .all()
         )
-        processed = 0
+        moved_to_pool = 0
         for event in events:
             try:
-                detail = spider.fetch_event_detail(event.event_id, event.sub_id)
                 now = _now_ms()
+                pool_event = (
+                    self.db.query(EventPool)
+                    .filter(
+                        EventPool.event_id == event.event_id,
+                        EventPool.sub_id == event.sub_id,
+                    )
+                    .first()
+                )
+
+                if pool_event:
+                    if event.longitude is None and pool_event.longitude is not None:
+                        event.longitude = pool_event.longitude
+                    if event.latitude is None and pool_event.latitude is not None:
+                        event.latitude = pool_event.latitude
+                    if not event.continent and pool_event.continent:
+                        event.continent = pool_event.continent
+                    if not event.address and pool_event.address:
+                        event.address = pool_event.address
+                    if not event.category_name and pool_event.category_name:
+                        event.category_name = pool_event.category_name
+                    if not event.country and pool_event.country:
+                        event.country = pool_event.country
+                    if not event.event_date and pool_event.event_date:
+                        event.event_date = pool_event.event_date
+                    if not event.last_update and pool_event.last_update:
+                        event.last_update = pool_event.last_update
+
+                detail = None
+                if event.longitude is None or event.latitude is None:
+                    detail = spider.fetch_event_detail(event.event_id, event.sub_id)
+
                 if detail:
                     event.longitude = detail.get("longitude")
                     event.latitude = detail.get("latitude")
                     event.continent = detail.get("continent") or event.continent
                     event.address = detail.get("address")
+                    event.country = detail.get("country") or event.country
+                    event.category = detail.get("category") or event.category
+                    event.category_name = detail.get("category_name") or event.category_name
+                    event.severity = detail.get("severity") or event.severity
+                    event.event_date = detail.get("event_date") or event.event_date
                     if detail.get("last_update"):
                         event.last_update = detail["last_update"]
                     event.details_json = json.dumps(detail.get("details_json", {}), ensure_ascii=False)
 
+                    # 同步到全局事件池
+                    if event.longitude and event.latitude:
+                        epm.update_pool_coordinates(
+                            event.event_id, event.sub_id,
+                            event.longitude, event.latitude,
+                            event.continent, event.address
+                        )
+                    if detail.get("details_json"):
+                        epm.update_pool_details(event.event_id, event.sub_id, detail.get("details_json", {}))
+
                 if event.longitude and event.latitude:
                     event.status = "pool"
+                    epm.link_event_to_pool(event.uuid, event.event_id, event.sub_id)
                     logger.info(f"事件 {event.event_id} 进入蓄水池 ({event.longitude:.4f}, {event.latitude:.4f})")
+                    moved_to_pool += 1
                 else:
                     logger.warning(f"事件 {event.event_id} 无坐标，保持 pending")
 
                 event.updated_at = now
-                processed += 1
             except Exception as e:
                 logger.error(f"处理事件 {event.event_id} 失败: {e}")
 
         self.db.commit()
-        return processed
+        return moved_to_pool
 
     # ── 2. pool → 提交 GEE 下载任务 ─────────────────────────
 
@@ -131,7 +179,84 @@ class PoolManager:
             submitted += 1
 
         self.db.commit()
+
+        # 处理 GEE 永久失败的 pool 事件（无可用影像）
+        self._advance_no_imagery_events()
+
         return submitted
+
+    def _advance_no_imagery_events(self) -> int:
+        """
+        将 GEE 下载永久失败（无可用卫星影像）的 pool 事件直接推进到 checked。
+        若 fail_open=True：推进到 checked（最终会入队给 GPU）。
+        若 fail_open=False：打 warning 日志，事件保留在 pool。
+        """
+        pool_events = (
+            self.db.query(Event)
+            .filter(Event.status == "pool")
+            .all()
+        )
+
+        advanced = 0
+        now = _now_ms()
+
+        for event in pool_events:
+            # 还有进行中的任务，先等
+            active = (
+                self.db.query(GeeTask)
+                .filter(
+                    GeeTask.uuid == event.uuid,
+                    GeeTask.status.in_(["PENDING", "RUNNING"]),
+                )
+                .first()
+            )
+            if active:
+                continue
+
+            # 各类型任务状态
+            pre_ok   = self.db.query(GeeTask).filter(GeeTask.uuid == event.uuid, GeeTask.task_type == "pre_disaster",  GeeTask.status == "COMPLETED").first()
+            pre_fail = self.db.query(GeeTask).filter(GeeTask.uuid == event.uuid, GeeTask.task_type == "pre_disaster",  GeeTask.status == "FAILED").first()
+            post_ok  = self.db.query(GeeTask).filter(GeeTask.uuid == event.uuid, GeeTask.task_type == "post_disaster", GeeTask.status == "COMPLETED").first()
+            post_fail= self.db.query(GeeTask).filter(GeeTask.uuid == event.uuid, GeeTask.task_type == "post_disaster", GeeTask.status == "FAILED").first()
+
+            # 必须至少尝试过一次（有 FAILED 记录），否则跳过
+            if not pre_fail and not post_fail:
+                continue
+
+            # 标记失败影像为"已尝试"（避免 assess_ready_events 处理时崩溃）
+            if pre_fail and not pre_ok and not event.pre_image_downloaded:
+                event.pre_image_downloaded = 1
+                event.pre_image_path = None
+            if post_fail and not post_ok and not event.post_image_downloaded:
+                event.post_image_downloaded = 1
+                event.post_image_path = None
+
+            # 直接写入质量评估结果，跳过实际图像评估
+            qa = {
+                "score": 0,
+                "pass": self.qa.fail_open,
+                "no_imagery": True,
+                "reason": "GEE 未找到可用卫星影像，依据 fail_open 配置决定是否放行",
+            }
+            event.quality_score = 0
+            event.quality_assessment = json.dumps(qa, ensure_ascii=False)
+            event.quality_checked = 1
+            event.quality_pass = 1 if self.qa.fail_open else 0
+            event.quality_check_time = now
+            event.updated_at = now
+
+            if self.qa.fail_open:
+                event.status = "checked"
+                logger.info(f"[{event.uuid[:8]}] GEE 无可用影像，fail_open=True → 推进到 checked")
+                advanced += 1
+            else:
+                logger.warning(f"[{event.uuid[:8]}] GEE 无可用影像，fail_open=False → 保留 pool")
+
+        if advanced > 0:
+            self.db.commit()
+            logger.info(f"共 {advanced} 个无影像事件推进到 checked")
+
+        return advanced
 
     def _submit_single_gee_task(self, event: Event, event_ts: int, task_type: str):
         """提交单个 GEE 任务并记录到 gee_tasks 表"""
@@ -140,7 +265,7 @@ class PoolManager:
             .filter(
                 GeeTask.uuid == event.uuid,
                 GeeTask.task_type == task_type,
-                GeeTask.status.in_(["PENDING", "RUNNING"]),
+                GeeTask.status.in_(["PENDING", "RUNNING", "FAILED"]),  # FAILED 也跳过，防止无限重试
             )
             .first()
         )
@@ -287,9 +412,9 @@ class PoolManager:
         """构建 GPU Worker 需要的任务数据"""
         from config.settings import settings as cfg
 
-        server_host = f"http://localhost:{cfg.SERVER_PORT}"
-        if cfg.APP_ENV == "production":
-            server_host = cfg.CORS_ORIGINS[0] if cfg.CORS_ORIGINS else server_host
+        # 优先使用显式配置的 SERVER_BASE_URL（生产环境必须设置），
+        # 否则回退到 localhost（仅适用于 GPU Worker 与 US Server 同机或同内网的场景）
+        server_host = cfg.SERVER_BASE_URL or f"http://localhost:{cfg.SERVER_PORT}"
 
         task_definitions = self.task_cfg.get("tasks", [])
 

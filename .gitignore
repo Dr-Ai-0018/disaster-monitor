@@ -1,11 +1,16 @@
-# Global ignores
+# ── OS artifacts ──────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
-*.log
-*.tmp
-*.swp
+desktop.ini
+ehthumbs.db
 
-# Python artifacts
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.pyo
@@ -14,23 +19,55 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
 
-# Virtual environments
-.venv/
+# ── Virtual environments ───────────────────────────────────────────────────────
 venv/
+.venv/
 env/
+.env.local
 .python-version
 
-# Environment/config files
+# ── Secrets & credentials ──────────────────────────────────────────────────────
 .env
-.env.*
 *.secret
 *.pem
+*.key
+*.p12
+*.pfx
+config/service_account.json
 
-# Databases & cache blobs
+# ── Databases ─────────────────────────────────────────────────────────────────
 *.db
 *.db-wal
 *.db-shm
+*.sqlite
+*.sqlite3
 
-# Repository data dumps (user-requested)
+# ── Logs & temp ───────────────────────────────────────────────────────────────
+*.log
+*.log.*
+logs/
+*.tmp
+*.swp
+*.bak
+*~
+
+# ── Backup directories ─────────────────────────────────────────────────────────
+.backup/
+backups/
+
+# ── Claude Code session data ──────────────────────────────────────────────────
+.claude/
+
+# ── Reference / data dumps (large, not versioned) ────────────────────────────
 reference/
+
+# ── Test directories (scripts kept locally, not versioned) ───────────────────
+test/

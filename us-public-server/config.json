@@ -4,7 +4,6 @@
     "version": "1.0.0",
     "timezone": "UTC"
   },
-
   "rsoe": {
     "base_url": "https://rsoe-edis.org",
     "api_base": "https://rsoe-edis.org/gateway/webapi",
@@ -13,7 +12,6 @@
     "max_retries": 3,
     "retry_delay": 5
   },
-
   "gee": {
     "dataset": "COPERNICUS/S2_SR_HARMONIZED",
     "fallback_datasets": [
@@ -30,15 +28,14 @@
     "quota_warning_threshold": 2000,
     "quota_pause_threshold": 2800
   },
-
   "quality_assessment": {
     "enabled": true,
     "cloud_coverage_threshold": 30,
     "pass_score_threshold": 60,
+    "fail_open": true,
     "max_retries": 2,
     "assessment_timeout": 60
   },
-
   "task_queue": {
     "default_lock_duration_seconds": 7200,
     "heartbeat_interval_seconds": 300,
@@ -52,21 +49,49 @@
       "recent_30d": 20
     },
     "tasks": [
-      {"task_id": 1, "type": "IMG_CAP",     "prompt": "Describe this satellite image in detail, focusing on visible land features, structures, and any signs of damage or disaster impact."},
-      {"task_id": 2, "type": "IMG_VQA",     "prompt": "Is there visible disaster impact (damage, destruction, flooding, fire, or other hazards) in this image? Answer only: Yes or No."},
-      {"task_id": 3, "type": "IMG_VQA",     "prompt": "What type of disaster or hazard is shown in this image? Answer with a short phrase (e.g., 'wildfire', 'flooding', 'earthquake damage', 'none')."},
-      {"task_id": 4, "type": "IMG_CT",      "prompt": "Describe the main land-cover types and any visible changes or abnormal areas compared to a normal state."},
-      {"task_id": 5, "type": "PIX_SEG",     "prompt": "Segment the affected/damaged area in this image. Output polygons with <poly> ... </poly>."},
-      {"task_id": 6, "type": "PIX_CHG",     "prompt": "Locate areas that appear changed or affected by the disaster. Output polygons with <poly> ... </poly>."},
-      {"task_id": 7, "type": "REG_DET_HBB", "prompt": "Detect affected or damaged regions in this image. Output horizontal bounding boxes."}
+      {
+        "task_id": 1,
+        "type": "IMG_CAP",
+        "prompt": "Describe this satellite image in detail, focusing on visible land features, structures, and any signs of damage or disaster impact."
+      },
+      {
+        "task_id": 2,
+        "type": "IMG_VQA",
+        "prompt": "Is there visible disaster impact (damage, destruction, flooding, fire, or other hazards) in this image? Answer only: Yes or No."
+      },
+      {
+        "task_id": 3,
+        "type": "IMG_VQA",
+        "prompt": "What type of disaster or hazard is shown in this image? Answer with a short phrase (e.g., 'wildfire', 'flooding', 'earthquake damage', 'none')."
+      },
+      {
+        "task_id": 4,
+        "type": "IMG_CT",
+        "prompt": "Describe the main land-cover types and any visible changes or abnormal areas compared to a normal state."
+      },
+      {
+        "task_id": 5,
+        "type": "PIX_SEG",
+        "prompt": "Segment the affected/damaged area in this image. Output polygons with <poly> ... </poly>."
+      },
+      {
+        "task_id": 6,
+        "type": "PIX_CHG",
+        "prompt": "Locate areas that appear changed or affected by the disaster. Output polygons with <poly> ... </poly>."
+      },
+      {
+        "task_id": 7,
+        "type": "REG_DET_HBB",
+        "prompt": "Detect affected or damaged regions in this image. Output horizontal bounding boxes."
+      }
     ]
   },
-
   "scheduler": {
     "fetch_rsoe_data": {
       "enabled": true,
+      "run_on_startup": true,
       "cron": "0 2 * * *",
-      "description": "每天凌晨2点抓取RSOE数据"
+      "description": "每天凌晨2点抓取RSOE数据；run_on_startup=true 时启动后立即执行一次"
     },
     "check_gee_tasks": {
       "enabled": true,
@@ -95,13 +120,11 @@
       "retention_days": 90
     }
   },
-
   "report_generation": {
     "top_events_count": 5,
     "max_summary_length": 300,
     "temperature": 0.7
   },
-
   "storage": {
     "html_path": "storage/html",
     "json_path": "storage/json",
@@ -110,11 +133,16 @@
     "max_storage_gb": 500,
     "cleanup_enabled": true
   },
-
   "api": {
     "rate_limit": {
-      "admin": {"requests": 1000, "period_hours": 1},
-      "tasks": {"requests": 10000, "period_hours": 1}
+      "admin": {
+        "requests": 1000,
+        "period_hours": 1
+      },
+      "tasks": {
+        "requests": 10000,
+        "period_hours": 1
+      }
     },
     "pagination": {
       "default_limit": 50,

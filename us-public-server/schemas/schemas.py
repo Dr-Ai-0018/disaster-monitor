@@ -299,3 +299,47 @@ class ErrorResponse(BaseModel):
     detail: str
     error_code: Optional[str] = None
     timestamp: Optional[int] = None
+
+
+# ──────────────────────────────────────────
+# Event Pool
+# ──────────────────────────────────────────
+
+class EventPoolItem(BaseModel):
+    event_id: int
+    sub_id: int
+    title: str
+    category: Optional[str]
+    category_name: Optional[str]
+    country: Optional[str]
+    continent: Optional[str]
+    severity: Optional[str]
+    longitude: Optional[float]
+    latitude: Optional[float]
+    address: Optional[str]
+    event_date: Optional[int]
+    last_update: Optional[int]
+    first_seen: int
+    last_seen: int
+    fetch_count: int
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+
+class EventPoolListResponse(BaseModel):
+    total: int
+    page: int
+    limit: int
+    pages: int
+    data: List[EventPoolItem]
+
+
+class EventPoolStatsResponse(BaseModel):
+    total_events: int
+    active_events: int
+    inactive_events: int
+    by_category: Dict[str, int]
+    by_country: Dict[str, int]
+    by_severity: Dict[str, int]

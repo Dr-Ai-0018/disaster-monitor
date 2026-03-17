@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>灾害监测 // 全球分析平台</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@100;300;400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #f7f7f7;
+            background-image: radial-gradient(#d4d4d4 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
+
+        .tech-card {
+            background: rgba(255,255,255,0.88);
+            backdrop-filter: blur(12px);
+            border: 1px solid #e2e8f0;
+            position: relative;
+            transition: all 0.35s cubic-bezier(0.19, 1, 0.22, 1);
+        }
+        .tech-card:hover {
+            border-color: #111;
+            box-shadow: 4px 4px 0px 0px rgba(17,17,17,1);
+            transform: translate(-2px,-2px);
+            z-index: 10;
+        }
+        .tech-card::before, .tech-card::after {
+            content: ''; position: absolute;
+            width: 10px; height: 10px;
+            border: 2px solid transparent;
+            transition: all 0.35s cubic-bezier(0.19, 1, 0.22, 1);
+            pointer-events: none;
+        }
+        .tech-card::before { top:-1px; left:-1px; border-top-color:#111; border-left-color:#111; opacity:0; transform:scale(0.5); }
+        .tech-card::after  { bottom:-1px; right:-1px; border-bottom-color:#111; border-right-color:#111; opacity:0; transform:scale(0.5); }
+        .tech-card:hover::before, .tech-card:hover::after { opacity:1; transform:scale(1); }
+
+        .no-hover-effect:hover {
+            border-color: #e2e8f0;
+            box-shadow: none;
+            transform: none;
+        }
+        .no-hover-effect:hover::before, .no-hover-effect:hover::after { opacity:0; }
+
+        .btn-sweep {
+            position: relative; overflow: hidden; z-index: 1;
+            transition: color 0.4s ease, border-color 0.4s ease;
+        }
+        .btn-sweep::before {
+            content: ''; position: absolute;
+            top:0; left:0; width:100%; height:100%;
+            background: #111; z-index: -1;
+            transform: scaleX(0); transform-origin: left;
+            transition: transform 0.4s cubic-bezier(0.19,1,0.22,1);
+        }
+        .btn-sweep:hover::before { transform: scaleX(1); }
+        .btn-sweep:hover { color:#fff; border-color:#111; }
+
+        .tab-btn { transition: all 0.25s ease; }
+        .tab-btn.active {
+            background: #111; color: #fff;
+            border-color: #111;
+        }
+
+        .fade-in-up {
+            animation: fadeInUp 0.7s cubic-bezier(0.19,1,0.22,1) forwards;
+            opacity: 0; transform: translateY(16px);
+        }
+        @keyframes fadeInUp { to { opacity:1; transform:translateY(0); } }
+
+        .pulse-dot::after {
+            content: ''; position: absolute; top:0; left:0;
+            width:100%; height:100%;
+            background-color: inherit; border-radius: inherit;
+            animation: pulse-anim 2s cubic-bezier(0.4,0,0.6,1) infinite;
+        }
+        @keyframes pulse-anim { 0%{transform:scale(1);opacity:.8;} 100%{transform:scale(3);opacity:0;} }
+
+        .loading-bar-anim {
+            animation: scan 1.2s cubic-bezier(0.19,1,0.22,1) infinite;
+        }
+        @keyframes scan { 0%{transform:translateX(-130%);} 100%{transform:translateX(320%);} }
+
+        /* 详情面板 */
+        #detail-panel {
+            transition: transform 0.4s cubic-bezier(0.19,1,0.22,1), opacity 0.3s ease;
+        }
+        #detail-panel.hidden-panel {
+            transform: translateX(100%); opacity: 0; pointer-events: none;
+        }
+
+        /* 影像对比 */
+        .img-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .img-label {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px; font-weight: 700;
+            letter-spacing: 0.12em; text-transform: uppercase;
+        }
+        .satellite-img {
+            width: 100%; aspect-ratio: 1/1;
+            object-fit: cover;
+            border: 1px solid #e2e8f0;
+            background: #f1f5f9;
+        }
+        .satellite-img-placeholder {
+            width: 100%; aspect-ratio: 1/1;
+            background: repeating-linear-gradient(
+                45deg, #f1f5f9, #f1f5f9 10px, #e2e8f0 10px, #e2e8f0 20px
+            );
+            border: 1px solid #e2e8f0;
+            display: flex; align-items: center; justify-content: center;
+        }
+
+        /* 报告正文 Markdown */
+        .report-body h1, .report-body h2, .report-body h3 {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 700; margin: 1.2em 0 0.4em;
+        }
+        .report-body h1 { font-size: 1.1rem; border-bottom: 2px solid #111; padding-bottom: 6px; }
+        .report-body h2 { font-size: 0.95rem; border-left: 3px solid #111; padding-left: 8px; }
+        .report-body h3 { font-size: 0.85rem; color: #444; }
+        .report-body p  { line-height: 1.75; margin-bottom: 0.75em; color: #374151; font-size: 0.875rem; }
+        .report-body ul, .report-body ol { padding-left: 1.5em; margin-bottom: 0.75em; }
+        .report-body li { line-height: 1.7; color: #374151; font-size: 0.875rem; margin-bottom: 0.25em; }
+        .report-body strong { color: #111; font-weight: 700; }
+        .report-body em { font-style: italic; color: #555; }
+        .report-body hr { border: none; border-top: 1px solid #e2e8f0; margin: 1.2em 0; }
+        .report-body blockquote {
+            border-left: 3px solid #111; padding-left: 1em;
+            color: #555; font-style: italic; margin: 0.75em 0;
+        }
+        /* Markdown 表格样式 */
+        .report-body table {
+            width: 100%; border-collapse: collapse; margin-bottom: 1em;
+            font-size: 0.8rem; font-family: 'JetBrains Mono', monospace;
+        }
+        .report-body th {
+            background: #f8f9fa; border: 1px solid #e2e8f0;
+            padding: 6px 10px; text-align: left; font-weight: 700;
+            font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        .report-body td {
+            border: 1px solid #e2e8f0; padding: 6px 10px; color: #374151;
+        }
+        .report-body tr:nth-child(even) td { background: #f8fafc; }
+        /* code blocks */
+        .report-body code {
+            background: #f1f5f9; padding: 2px 5px; font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem; color: #374151;
+        }
+        .report-body pre {
+            background: #f1f5f9; padding: 12px; overflow-x: auto; margin-bottom: 0.75em;
+        }
+        .report-body pre code { background: none; padding: 0; }
+    </style>
+</head>
+<body class="font-sans min-h-screen flex flex-col antialiased selection:bg-black selection:text-white">
+
+<!-- ── 顶部导航 ── -->
+<header class="sticky top-0 z-50 border-b border-gray-200 px-6 py-3.5 flex justify-between items-center bg-white/85 backdrop-blur-md shadow-sm">
+    <div class="flex items-center gap-4">
+        <div class="w-9 h-9 bg-black text-white flex items-center justify-center shadow-[2px_2px_0_#d4d4d4]">
+            <i data-lucide="alert-triangle" class="w-5 h-5"></i>
+        </div>
+        <div>
+            <h1 class="font-mono font-bold tracking-widest text-base leading-tight">DISASTER_MONITOR</h1>
+            <p class="font-mono text-[9px] text-gray-400 uppercase tracking-widest">v1.0.0 // AI-Powered Analysis</p>
+        </div>
+    </div>
+
+    <!-- 导航 Tab -->
+    <div class="flex items-center gap-1 border border-gray-200 p-0.5 bg-white">
+        <button id="tab-pool"     class="tab-btn active font-mono text-[10px] font-bold tracking-widest uppercase px-4 py-2 border border-transparent" onclick="switchTab('pool')">事件池</button>
+        <button id="tab-reports"  class="tab-btn font-mono text-[10px] font-bold tracking-widest uppercase px-4 py-2 border border-transparent text-gray-500" onclick="switchTab('reports')">AI报告</button>
+        <button id="tab-analysis" class="tab-btn font-mono text-[10px] font-bold tracking-widest uppercase px-4 py-2 border border-transparent text-gray-500" onclick="switchTab('analysis')">AI分析</button>
+    </div>
+
+    <div class="flex items-center gap-6">
+        <div class="flex items-center gap-2 font-mono text-xs border border-gray-200 px-3 py-1.5 bg-white shadow-[2px_2px_0_#e5e5e5]">
+            <span class="w-2 h-2 rounded-full bg-green-500 pulse-dot relative inline-block"></span>
+            <span class="font-semibold tracking-wider">实时</span>
+        </div>
+        <a href="/admin" class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-400 hover:text-black transition-colors">管理 →</a>
+    </div>
+</header>
+
+<!-- ════════════════════════════════════════════
+     TAB 1: 事件池
+════════════════════════════════════════════ -->
+<div id="view-pool" class="flex-1 p-6 grid grid-cols-12 gap-6 max-w-[1600px] mx-auto w-full">
+
+    <!-- 左侧统计 + 图表 -->
+    <div class="col-span-12 lg:col-span-3 flex flex-col gap-5">
+        <div class="tech-card p-5 fade-in-up" style="animation-delay:0.05s">
+            <div class="flex justify-between items-start mb-4">
+                <span class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold">活跃事件</span>
+                <i data-lucide="activity" class="w-4 h-4 opacity-60"></i>
+            </div>
+            <div class="text-4xl font-mono font-light tracking-tighter mb-1" id="metric-active">--</div>
+            <div class="flex items-center gap-1.5 text-[10px] font-mono text-gray-500">
+                <span class="w-1.5 h-1.5 bg-green-500 inline-block rounded-full pulse-dot relative"></span>
+                <span>实时更新</span>
+            </div>
+        </div>
+        <div class="tech-card p-5 fade-in-up" style="animation-delay:0.1s">
+            <div class="flex justify-between items-start mb-4">
+                <span class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold">事件总量</span>
+                <i data-lucide="database" class="w-4 h-4 opacity-60"></i>
+            </div>
+            <div class="text-4xl font-mono font-light tracking-tighter mb-1" id="metric-total">--</div>
+            <div class="flex items-center gap-1.5 text-[10px] font-mono text-gray-500">
+                <span class="w-1.5 h-1.5 bg-black inline-block"></span>
+                <span>历史累计</span>
+            </div>
+        </div>
+
+        <!-- 统计概览 + ECharts -->
+        <div class="tech-card p-5 fade-in-up" style="animation-delay:0.15s">
+            <div class="flex justify-between items-center mb-4 border-b border-gray-100 pb-3">
+                <h2 class="font-mono text-xs font-bold tracking-widest">统计概览</h2>
+                <i data-lucide="bar-chart-2" class="w-4 h-4 text-gray-400"></i>
+            </div>
+            <div class="flex justify-between mb-4">
+                <div class="font-mono text-[11px]">
+                    <span class="text-gray-500 uppercase tracking-wider">类别</span>
+                    <span id="stat-categories" class="font-bold ml-1.5">--</span>
+                </div>
+                <div class="font-mono text-[11px]">
+                    <span class="text-gray-500 uppercase tracking-wider">国家</span>
+                    <span id="stat-countries" class="font-bold ml-1.5">--</span>
+                </div>
+                <!-- backward compat, hidden -->
+                <span id="stat-severity" class="hidden"></span>
+            </div>
+            <div class="font-mono text-[9px] text-gray-400 uppercase tracking-widest mb-1">严重程度分布</div>
+            <div id="chart-severity" style="height:130px"></div>
+            <div class="font-mono text-[9px] text-gray-400 uppercase tracking-widest mt-3 mb-1">类别分布 TOP 6</div>
+            <div id="chart-category" style="height:155px"></div>
+        </div>
+    </div>
+
+    <!-- 右侧事件列表 -->
+    <div class="col-span-12 lg:col-span-9 flex flex-col gap-5">
+        <div id="error-notice" class="hidden tech-card p-4 border-l-4 border-red-600">
+            <div class="font-mono text-xs font-bold tracking-widest text-red-600 mb-1">连接错误</div>
+            <div class="font-mono text-xs text-gray-600" id="error-text"></div>
+        </div>
+
+        <!-- 过滤器 -->
+        <div class="tech-card p-5 fade-in-up" style="animation-delay:0.05s">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                    <label class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-2 block">类别</label>
+                    <select id="filter-category" class="w-full px-3 py-2 border border-gray-200 font-mono text-xs focus:outline-none focus:border-black transition-colors">
+                        <option value="">全部类型</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-2 block">国家/地区</label>
+                    <input type="text" id="filter-country" placeholder="搜索..." class="w-full px-3 py-2 border border-gray-200 font-mono text-xs focus:outline-none focus:border-black transition-colors">
+                </div>
+                <div>
+                    <label class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-2 block">严重程度</label>
+                    <select id="filter-severity" class="w-full px-3 py-2 border border-gray-200 font-mono text-xs focus:outline-none focus:border-black transition-colors">
+                        <option value="">全部等级</option>
+                        <option value="extreme">极端</option>
+                        <option value="high">高</option>
+                        <option value="medium">中</option>
+                        <option value="low">低</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- 事件表 -->
+        <div class="tech-card p-0 flex-1 flex flex-col fade-in-up overflow-hidden" style="animation-delay:0.15s">
+            <div class="p-5 border-b border-gray-100 flex justify-between items-center">
+                <div class="flex items-center gap-3">
+                    <i data-lucide="layers" class="w-4 h-4"></i>
+                    <h2 class="font-mono text-xs font-bold tracking-widest">事件列表</h2>
+                </div>
+                <span class="text-[10px] font-mono font-bold text-gray-500 bg-gray-100 px-2 py-1" id="event-count">0 个事件</span>
+            </div>
+            <div class="flex-1 overflow-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="font-mono text-[10px] text-gray-400 uppercase tracking-widest border-b border-gray-100">
+                            <th class="py-3 px-5 font-semibold">编号</th>
+                            <th class="py-3 px-5 font-semibold">标题</th>
+                            <th class="py-3 px-5 font-semibold">位置</th>
+                            <th class="py-3 px-5 font-semibold">类别</th>
+                            <th class="py-3 px-5 font-semibold text-right">严重程度</th>
+                        </tr>
+                    </thead>
+                    <tbody class="font-mono text-xs" id="event-tbody"></tbody>
+                </table>
+            </div>
+            <div class="p-4 border-t border-gray-100 flex justify-between items-center">
+                <button id="btn-prev" class="px-4 py-1.5 border border-gray-200 font-mono text-xs font-bold tracking-widest uppercase btn-sweep disabled:opacity-30 disabled:cursor-not-allowed" disabled>上一页</button>
+                <span class="font-mono text-xs font-bold tracking-wider" id="pagination-info">第 1 / 1 页</span>
+                <button id="btn-next" class="px-4 py-1.5 border border-gray-200 font-mono text-xs font-bold tracking-widest uppercase btn-sweep disabled:opacity-30 disabled:cursor-not-allowed" disabled>下一页</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ════════════════════════════════════════════
+     TAB 2: AI报告
+════════════════════════════════════════════ -->
+<div id="view-reports" class="hidden flex-1 p-6 max-w-[1600px] mx-auto w-full">
+    <div class="grid grid-cols-12 gap-6">
+
+        <!-- 报告列表 -->
+        <div class="col-span-12 lg:col-span-4 flex flex-col gap-4">
+            <div class="tech-card p-5">
+                <div class="flex items-center gap-3 mb-1">
+                    <i data-lucide="newspaper" class="w-4 h-4"></i>
+                    <h2 class="font-mono text-xs font-bold tracking-widest">AI 每日报告</h2>
+                </div>
+                <p class="font-mono text-[10px] text-gray-400 mt-1">已发布的灾害日报（AI 生成）</p>
+            </div>
+            <div id="report-list" class="flex flex-col gap-3">
+                <!-- JS 填充 -->
+            </div>
+            <div class="text-center font-mono text-[10px] text-gray-400 py-4 hidden" id="report-no-data">暂无已发布报告</div>
+        </div>
+
+        <!-- 报告详情 -->
+        <div class="col-span-12 lg:col-span-8">
+            <div id="report-detail-empty" class="tech-card no-hover-effect p-12 flex flex-col items-center justify-center gap-4 text-center min-h-[400px]">
+                <i data-lucide="file-text" class="w-12 h-12 text-gray-200"></i>
+                <div class="font-mono text-xs text-gray-400 uppercase tracking-widest">← 点击左侧报告查看全文</div>
+            </div>
+            <div id="report-detail-content" class="hidden tech-card no-hover-effect p-8">
+                <div class="flex items-start justify-between mb-6 pb-5 border-b border-gray-100">
+                    <div>
+                        <div class="font-mono text-[10px] text-gray-400 uppercase tracking-widest mb-2" id="rd-date">--</div>
+                        <h2 class="font-bold text-xl leading-snug" id="rd-title">--</h2>
+                    </div>
+                    <div class="text-right font-mono text-[10px] text-gray-400 shrink-0 ml-6">
+                        <div id="rd-event-count" class="text-2xl font-light text-black mb-0.5">--</div>
+                        <div>个事件</div>
+                    </div>
+                </div>
+
+                <!-- ECharts 分类统计 -->
+                <div id="rd-stats" class="hidden mb-6">
+                    <div class="grid grid-cols-3 gap-3">
+                        <div class="border border-gray-100 p-3">
+                            <div class="font-mono text-[9px] text-gray-400 uppercase tracking-widest mb-2">按类别</div>
+                            <div id="chart-report-cat" style="height:140px"></div>
+                        </div>
+                        <div class="border border-gray-100 p-3">
+                            <div class="font-mono text-[9px] text-gray-400 uppercase tracking-widest mb-2">按等级</div>
+                            <div id="chart-report-sev" style="height:140px"></div>
+                        </div>
+                        <div class="border border-gray-100 p-3">
+                            <div class="font-mono text-[9px] text-gray-400 uppercase tracking-widest mb-2">按国家</div>
+                            <div id="chart-report-cou" style="height:140px"></div>
+                        </div>
+                    </div>
+                    <!-- 兼容旧版 JS renderStatGrid，保留隐藏容器 -->
+                    <div id="rd-cat" class="hidden"></div>
+                    <div id="rd-sev" class="hidden"></div>
+                    <div id="rd-cou" class="hidden"></div>
+                </div>
+
+                <!-- 报告正文（marked.js 渲染） -->
+                <div class="report-body prose max-w-none" id="rd-body"></div>
+
+                <div class="mt-6 pt-4 border-t border-gray-100 font-mono text-[10px] text-gray-400 flex justify-between">
+                    <span>AI 生成</span>
+                    <span id="rd-gen-time">--</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ════════════════════════════════════════════
+     TAB 3: AI分析（成品）
+════════════════════════════════════════════ -->
+<div id="view-analysis" class="hidden flex-1 p-6 max-w-[1600px] mx-auto w-full">
+    <div class="flex gap-6 h-full">
+
+        <!-- 成品列表 (左) -->
+        <div class="w-[420px] shrink-0 flex flex-col gap-4">
+            <div class="tech-card p-5">
+                <div class="flex items-center gap-3 mb-1">
+                    <i data-lucide="satellite" class="w-4 h-4"></i>
+                    <h2 class="font-mono text-xs font-bold tracking-widest">AI 遥感分析</h2>
+                </div>
+                <p class="font-mono text-[10px] text-gray-400 mt-1">遥感影像 × AI 推理 × 原始来源</p>
+            </div>
+
+            <div id="product-list" class="flex flex-col gap-3 overflow-y-auto" style="max-height: calc(100vh - 220px)">
+                <!-- JS 填充 -->
+            </div>
+            <div class="text-center font-mono text-[10px] text-gray-400 py-4 hidden" id="product-no-data">暂无分析成品</div>
+            <div class="flex justify-between items-center">
+                <button id="prod-prev" class="px-4 py-1.5 border border-gray-200 font-mono text-xs font-bold tracking-widest uppercase btn-sweep disabled:opacity-30" disabled>上一页</button>
+                <span class="font-mono text-[10px] text-gray-500" id="prod-page-info">1 / 1</span>
+                <button id="prod-next" class="px-4 py-1.5 border border-gray-200 font-mono text-xs font-bold tracking-widest uppercase btn-sweep disabled:opacity-30" disabled>下一页</button>
+            </div>
+        </div>
+
+        <!-- 详情面板 (右) -->
+        <div class="flex-1 min-w-0 overflow-y-auto" style="max-height: calc(100vh - 160px)">
+            <!-- 空态 -->
+            <div id="product-detail-empty" class="tech-card no-hover-effect p-16 flex flex-col items-center justify-center gap-4 text-center">
+                <i data-lucide="image" class="w-16 h-16 text-gray-200"></i>
+                <div class="font-mono text-xs text-gray-400 uppercase tracking-widest">← 点击左侧事件查看分析详情</div>
+            </div>
+
+            <!-- 详情内容 -->
+            <div id="product-detail-content" class="hidden flex flex-col gap-5">
+
+                <!-- 标题行 -->
+                <div class="tech-card no-hover-effect p-6">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 mb-2">
+                                <span class="font-mono text-[9px] font-bold tracking-widest uppercase px-2 py-0.5 border" id="pd-category-badge">--</span>
+                                <span class="font-mono text-[9px] font-bold tracking-widest uppercase px-2 py-0.5 border" id="pd-severity-badge">--</span>
+                            </div>
+                            <h2 class="font-bold text-lg leading-snug mb-1" id="pd-title">--</h2>
+                            <div class="font-mono text-[11px] text-gray-500" id="pd-location">--</div>
+                        </div>
+                        <a id="pd-source-link" href="#" target="_blank" rel="noopener noreferrer"
+                           class="ml-6 shrink-0 flex items-center gap-1.5 px-3 py-2 border border-gray-300 font-mono text-[10px] font-bold tracking-widest uppercase btn-sweep hover:text-white transition-colors">
+                            <i data-lucide="external-link" class="w-3 h-3"></i>
+                            原始来源
+                        </a>
+                    </div>
+                    <div class="mt-3 pt-3 border-t border-gray-100 font-mono text-[10px] text-gray-400" id="pd-meta">--</div>
+                </div>
+
+                <!-- 卫星影像对比 -->
+                <div class="tech-card no-hover-effect p-6">
+                    <div class="flex items-center gap-2 mb-4">
+                        <i data-lucide="layers" class="w-4 h-4"></i>
+                        <span class="font-mono text-xs font-bold tracking-widest">卫星影像对比</span>
+                    </div>
+                    <div class="img-pair">
+                        <div>
+                            <div class="img-label text-gray-500 mb-2">灾前</div>
+                            <div id="pd-pre-wrap">
+                                <div class="satellite-img-placeholder"><span class="font-mono text-[10px] text-gray-400">无图像</span></div>
+                            </div>
+                            <div class="font-mono text-[10px] text-gray-400 mt-1.5" id="pd-pre-date">--</div>
+                        </div>
+                        <div>
+                            <div class="img-label text-gray-500 mb-2">灾后</div>
+                            <div id="pd-post-wrap">
+                                <div class="satellite-img-placeholder"><span class="font-mono text-[10px] text-gray-400">无图像</span></div>
+                            </div>
+                            <div class="font-mono text-[10px] text-gray-400 mt-1.5" id="pd-post-date">--</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI 推理结果 -->
+                <div class="tech-card no-hover-effect p-6">
+                    <div class="flex items-center gap-2 mb-4">
+                        <i data-lucide="cpu" class="w-4 h-4"></i>
+                        <span class="font-mono text-xs font-bold tracking-widest">AI 推理结果</span>
+                    </div>
+                    <div id="pd-inference" class="space-y-3">
+                        <!-- JS 填充 -->
+                    </div>
+                </div>
+
+                <!-- AI 摘要 -->
+                <div id="pd-summary-card" class="hidden tech-card no-hover-effect p-6">
+                    <div class="flex items-center gap-2 mb-4">
+                        <i data-lucide="align-left" class="w-4 h-4"></i>
+                        <span class="font-mono text-xs font-bold tracking-widest">AI 摘要</span>
+                    </div>
+                    <p class="text-sm text-gray-700 leading-relaxed" id="pd-summary-text">--</p>
+                </div>
+
+                <!-- 原始事件信息 -->
+                <div class="tech-card no-hover-effect p-6">
+                    <div class="flex items-center gap-2 mb-4">
+                        <i data-lucide="file-search" class="w-4 h-4"></i>
+                        <span class="font-mono text-xs font-bold tracking-widest">原始事件数据</span>
+                    </div>
+                    <div id="pd-raw-data" class="font-mono text-[11px] space-y-2 text-gray-600">
+                        <!-- JS 填充 -->
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Loading Overlay -->
+<div class="hidden fixed inset-0 flex items-center justify-center bg-white/80 backdrop-blur-sm z-[9999]" id="loading">
+    <div class="w-[420px] bg-white border border-gray-200 p-5 shadow-[4px_4px_0_#d4d4d4]">
+        <div class="flex justify-between items-center mb-3 font-mono text-[10px] font-bold tracking-[0.12em] uppercase text-gray-600">
+            <span id="loading-text">正在同步</span><span>实时</span>
+        </div>
+        <div class="h-2 border border-gray-200 bg-white overflow-hidden relative">
+            <div class="w-[36%] h-full bg-black loading-bar-anim"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+lucide.createIcons();
+</script>
+<script src="/assets/js/public.js"></script>
+</body>
+</html>

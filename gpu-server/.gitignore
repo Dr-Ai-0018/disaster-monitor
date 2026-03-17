@@ -1,10 +1,13 @@
-# Runtime outputs
-logs/
+# ── Model weights (large binaries, manage via DVC / LFS) ──────────────────────
+models/*.pth
+models/*.pt
+models/*.bin
+models/*.onnx
+models/*.safetensors
+models/*.gguf
+models/disaster_model/
+
+# ── Runtime directories ────────────────────────────────────────────────────────
 temp/
 cache/
-
-# Model weights
-models/*.pth
-models/*.bin
-models/*.safetensors
-models/disaster_model/
+logs/

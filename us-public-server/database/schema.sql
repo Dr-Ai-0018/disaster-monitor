@@ -182,3 +182,36 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 
 CREATE INDEX IF NOT EXISTS idx_api_tokens_is_active ON api_tokens(is_active);
 CREATE INDEX IF NOT EXISTS idx_api_tokens_name ON api_tokens(name);
+
+-- 8. 全局事件池表（去重后的所有事件总池）
+CREATE TABLE IF NOT EXISTS event_pool (
+    event_id INTEGER NOT NULL,
+    sub_id INTEGER DEFAULT 0,
+    title TEXT NOT NULL,
+    category TEXT,
+    category_name TEXT,
+    country TEXT,
+    continent TEXT,
+    severity TEXT,
+    longitude REAL,
+    latitude REAL,
+    address TEXT,
+    event_date INTEGER,
+    last_update INTEGER,
+    details_json TEXT,
+    source_url TEXT,
+    first_seen INTEGER NOT NULL,
+    last_seen INTEGER NOT NULL,
+    fetch_count INTEGER DEFAULT 1,
+    is_active INTEGER DEFAULT 1,
+    deactivated_at INTEGER,
+    related_uuid TEXT,
+    PRIMARY KEY (event_id, sub_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_pool_is_active ON event_pool(is_active);
+CREATE INDEX IF NOT EXISTS idx_event_pool_last_update ON event_pool(last_update);
+CREATE INDEX IF NOT EXISTS idx_event_pool_category ON event_pool(category);
+CREATE INDEX IF NOT EXISTS idx_event_pool_country ON event_pool(country);
+CREATE INDEX IF NOT EXISTS idx_event_pool_severity ON event_pool(severity);
+CREATE INDEX IF NOT EXISTS idx_event_pool_last_seen ON event_pool(last_seen);

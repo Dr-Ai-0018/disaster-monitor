@@ -1,17 +1,23 @@
-.env
-*.db
-*.db-wal
-*.db-shm
-__pycache__/
-*.pyc
-*.pyo
-.venv/
-venv/
-logs/
+# ── Runtime storage (large binary / generated files) ─────────────────────────
 storage/html/
 storage/json/
 storage/images/
 storage/reports/
-database/disaster.db
+
+# ── GEE service account key ────────────────────────────────────────────────────
 config/service_account.json
+
+# ── Backup directories ─────────────────────────────────────────────────────────
+.backup/
 backups/
+
+# ── Test output ────────────────────────────────────────────────────────────────
+test/output/
+tests/output/
+
+# ── Old / stale frontend artifacts ────────────────────────────────────────────
+frontend/*.bak
+frontend/*.old
+
+# ── Cache ──────────────────────────────────────────────────────────────────────
+cache/

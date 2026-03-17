@@ -1,8 +1,9 @@
 """
-日报生成模块（Gemini Flash + Pro）
+日报生成模块（Gemini Flash + Pro，纯 requests 实现）
 """
 import json
 import time
+import requests as _requests
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 from sqlalchemy.orm import Session
@@ -47,18 +48,49 @@ Generate a professional report in Markdown format with these sections:
 Use clear, professional language. Be factual and concise."""
 
 
+def _extract_text(response_json: dict) -> str:
+    """
+    从 Gemini REST API 响应中提取正文文本。
+    兼容 Gemini 2.5 Pro 的 thinking 模式：过滤掉 thought=true 的 parts，
+    只拼接真正的回答 parts。
+    """
+    try:
+        parts = response_json["candidates"][0]["content"]["parts"]
+        texts = [p["text"] for p in parts if not p.get("thought", False) and "text" in p]
+        return "\n".join(texts).strip()
+    except (KeyError, IndexError, TypeError) as e:
+        raise ValueError(f"Gemini 响应格式异常: {e}\n原始响应: {json.dumps(response_json, ensure_ascii=False)[:500]}")
+
+
+def _call_gemini(model: str, prompt: str, timeout: int = 60) -> str:
+    """
+    调用 Gemini REST API，返回纯文本结果。
+    自动处理 thinking 模型（2.5 Pro）和普通模型（Flash）。
+    """
+    if not settings.GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY 未配置")
+
+    url = f"{settings.GEMINI_BASE_URL}/models/{model}:generateContent"
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}]
+    }
+
+    api_key = settings.GEMINI_API_KEY
+    # sk- 开头说明是中转站，用 Bearer 认证；否则用官方 ?key= 参数
+    if api_key.startswith("sk-"):
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        resp = _requests.post(url, headers=headers, json=payload, timeout=timeout)
+    else:
+        resp = _requests.post(url, params={"key": api_key}, json=payload, timeout=timeout)
+
+    if resp.status_code != 200:
+        raise RuntimeError(f"Gemini API 错误 {resp.status_code}: {resp.text[:300]}")
+
+    return _extract_text(resp.json())
+
+
 class ReportGenerator:
-    """使用 Gemini 生成灾害日报"""
-
-    def __init__(self):
-        self._client = None
-
-    def _get_client(self):
-        if self._client is None:
-            import google.generativeai as genai
-            genai.configure(api_key=settings.GEMINI_API_KEY)
-            self._client = genai
-        return self._client
+    """使用 Gemini 生成灾害日报（纯 requests，无官方 SDK 依赖）"""
 
     # ── 单事件摘要（Gemini Flash） ────────────────────────
 
@@ -68,9 +100,6 @@ class ReportGenerator:
             return "Summary generation skipped (no API key configured)."
 
         try:
-            genai = self._get_client()
-            model = genai.GenerativeModel(settings.GEMINI_FLASH_MODEL)
-
             event_details = {}
             inference_results = {}
             try:
@@ -79,7 +108,6 @@ class ReportGenerator:
             except Exception:
                 pass
 
-            # 简化推理结果为文本
             inference_text = ""
             for k, v in inference_results.items():
                 if isinstance(v, dict):
@@ -92,8 +120,7 @@ class ReportGenerator:
                 inference_results=inference_text[:800],
             )
 
-            response = model.generate_content(prompt)
-            summary = response.text.strip()
+            summary = _call_gemini(settings.GEMINI_FLASH_MODEL, prompt, timeout=30)
             logger.info(f"[{product.uuid[:8]}] 摘要生成完成")
             return summary
 
@@ -137,7 +164,6 @@ class ReportGenerator:
         logger.info(f"开始生成日报: {report_date}")
         start_time = time.time()
 
-        # 查询当日完成的成品
         try:
             date_dt = datetime.strptime(report_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         except ValueError:
@@ -147,6 +173,7 @@ class ReportGenerator:
         start_ms = int(date_dt.timestamp() * 1000)
         end_ms = int((date_dt + timedelta(days=1)).timestamp() * 1000)
 
+        # 优先查询当日成品
         products = (
             db.query(Product)
             .filter(
@@ -156,24 +183,22 @@ class ReportGenerator:
             .all()
         )
 
+        # 回退：查询最近 7 天所有成品（不限 summary_generated，因为下面会补充生成）
         if not products:
-            # 也尝试查询最近7天有摘要的成品
             since_ms = int((date_dt - timedelta(days=7)).timestamp() * 1000)
             products = (
                 db.query(Product)
-                .filter(
-                    Product.summary_generated == 1,
-                    Product.created_at >= since_ms,
-                )
+                .filter(Product.created_at >= since_ms)
+                .order_by(Product.created_at.desc())
                 .limit(20)
                 .all()
             )
 
         if not products:
-            logger.warning(f"日期 {report_date} 无可用成品")
+            logger.warning(f"日期 {report_date} 无可用成品（最近 7 天也无数据）")
             return None
 
-        # 确保有摘要
+        # 确保每条成品都有摘要
         for product in products:
             if not product.summary:
                 product.summary = self.generate_event_summary(product)
@@ -193,14 +218,13 @@ class ReportGenerator:
                 category_stats[p.event_category] = category_stats.get(p.event_category, 0) + 1
             if p.event_country:
                 country_stats[p.event_country] = country_stats.get(p.event_country, 0) + 1
-            # severity from event
             event = db.query(Event).filter(Event.uuid == p.uuid).first()
             if event and event.severity:
                 severity_stats[event.severity] = severity_stats.get(event.severity, 0) + 1
 
         # 构建摘要列表
         summaries = []
-        for p in products[:20]:  # 最多20个
+        for p in products[:20]:
             summaries.append(
                 f"**{p.event_title or 'Unknown'}** ({p.event_country or 'N/A'}): "
                 f"{(p.summary or 'No summary available.')[:300]}"
@@ -218,7 +242,6 @@ class ReportGenerator:
         generation_time = time.time() - start_time
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-        # 检查是否已有当日日报
         existing = db.query(DailyReport).filter(DailyReport.report_date == report_date).first()
         if existing:
             existing.report_content = report_content
@@ -253,9 +276,6 @@ class ReportGenerator:
         self, date, summaries, category_stats, severity_stats, country_stats
     ) -> str:
         try:
-            genai = self._get_client()
-            model = genai.GenerativeModel(settings.GEMINI_PRO_MODEL)
-
             prompt = PRO_REPORT_PROMPT.format(
                 date=date,
                 total_count=len(summaries),
@@ -264,9 +284,7 @@ class ReportGenerator:
                 severity_stats=json.dumps(severity_stats, ensure_ascii=False),
                 country_stats=json.dumps(country_stats, ensure_ascii=False),
             )
-
-            response = model.generate_content(prompt)
-            return response.text.strip()
+            return _call_gemini(settings.GEMINI_PRO_MODEL, prompt, timeout=120)
         except Exception as e:
             logger.error(f"Gemini Pro 调用失败: {e}")
             return self._generate_fallback_report(

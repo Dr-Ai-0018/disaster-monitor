@@ -4,7 +4,7 @@
 import json
 import secrets
 from datetime import datetime, timezone
-from typing import List
+from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 
@@ -16,6 +16,21 @@ from schemas.schemas import (
 from utils.auth import get_current_admin
 
 router = APIRouter(prefix="/api/admin", tags=["管理后台"])
+
+# ── 脱敏工具 ──────────────────────────────────────────
+
+def _mask(value: str, keep_tail: int = 6) -> str:
+    """脱敏：保留末尾 keep_tail 个字符，其余替换为 ****"""
+    if not value:
+        return ""
+    if len(value) <= keep_tail:
+        return "****"
+    return "****" + value[-keep_tail:]
+
+
+def _is_masked(value: str) -> bool:
+    """判断值是否是脱敏占位符（前端原样回传时不更新）"""
+    return isinstance(value, str) and value.startswith("****")
 
 
 def _now_ms() -> int:
@@ -154,6 +169,146 @@ def disable_token(
     return MessageResponse(message=f"Token '{token_name}' 已禁用")
 
 
+# ── 系统配置读写 ───────────────────────────────────────
+
+# 前端字段名 → .env key 映射（is_secret=True 时返回脱敏值）
+_ENV_FIELD_MAP: Dict[str, tuple] = {
+    # (env_key, is_secret)
+    "openai_api_key":          ("OPENAI_API_KEY",          True),
+    "openai_base_url":         ("OPENAI_BASE_URL",         False),
+    "openai_model":            ("OPENAI_MODEL",            False),
+    "gemini_api_key":          ("GEMINI_API_KEY",          True),
+    "gemini_base_url":         ("GEMINI_BASE_URL",         False),
+    "gemini_flash_model":      ("GEMINI_FLASH_MODEL",      False),
+    "gemini_pro_model":        ("GEMINI_PRO_MODEL",        False),
+    "session_edis_web":        ("SESSION_EDIS_WEB",        True),
+    "arr_affinity":            ("ARR_AFFINITY",            True),
+    "arr_affinity_same_site":  ("ARR_AFFINITY_SAME_SITE",  True),
+    "ga":                      ("_GA",                     False),
+    "gads":                    ("__GADS",                  False),
+    "gpi":                     ("__GPI",                   False),
+    "eoi":                     ("__EOI",                   False),
+    "ga_kh":                   ("_GA_KHD7YP5VHW",         False),
+    "gee_project_id":          ("GEE_PROJECT_ID",          False),
+    "gee_service_account_email": ("GEE_SERVICE_ACCOUNT_EMAIL", False),
+    "request_timeout":         ("REQUEST_TIMEOUT",         False),
+    "request_delay":           ("REQUEST_DELAY",           False),
+    "cors_origins":            ("CORS_ORIGINS",            False),
+    "log_level":               ("LOG_LEVEL",               False),
+}
+
+# 前端字段名 → config.json 路径映射
+_JSON_FIELD_MAP: Dict[str, tuple] = {
+    # (path_list, python_type)
+    "gee_cloud_threshold":          (["gee", "cloud_threshold"],                    int),
+    "gee_time_before":              (["gee", "time_window_days_before"],             int),
+    "gee_time_after":               (["gee", "time_window_days_after"],              int),
+    "gee_scale":                    (["gee", "scale"],                               int),
+    "gee_max_concurrent":           (["gee", "max_concurrent_tasks"],                int),
+    "quality_enabled":              (["quality_assessment", "enabled"],              bool),
+    "quality_cloud_threshold":      (["quality_assessment", "cloud_coverage_threshold"], int),
+    "quality_pass_score":           (["quality_assessment", "pass_score_threshold"], int),
+    "quality_fail_open":            (["quality_assessment", "fail_open"],            bool),
+    "quality_max_retries":          (["quality_assessment", "max_retries"],          int),
+    "sched_fetch_enabled":          (["scheduler", "fetch_rsoe_data", "enabled"],    bool),
+    "sched_pool_enabled":           (["scheduler", "process_pool", "enabled"],       bool),
+    "sched_report_enabled":         (["scheduler", "generate_daily_report", "enabled"], bool),
+    "report_top_events":            (["report_generation", "top_events_count"],      int),
+    "report_max_summary_len":       (["report_generation", "max_summary_length"],    int),
+    "rsoe_request_timeout":         (["rsoe", "request_timeout"],                    int),
+    "rsoe_request_delay":           (["rsoe", "request_delay"],                      float),
+    "rsoe_max_retries":             (["rsoe", "max_retries"],                        int),
+}
+
+
+def _get_nested(obj: dict, path: list, default=None):
+    for key in path:
+        if isinstance(obj, dict):
+            obj = obj.get(key)
+        else:
+            return default
+    return obj if obj is not None else default
+
+
+def _cast(value: Any, typ: type) -> Any:
+    if typ == bool:
+        if isinstance(value, bool):
+            return value
+        return str(value).lower() in ("true", "1", "yes")
+    try:
+        return typ(value)
+    except (ValueError, TypeError):
+        return value
+
+
+@router.get("/settings")
+def get_settings(_: AdminUser = Depends(get_current_admin)):
+    """读取所有可配置项（敏感字段脱敏返回）"""
+    from config.settings import settings
+    from utils.config_manager import read_config_json
+
+    cfg = read_config_json()
+
+    result: Dict[str, Any] = {}
+
+    # .env 字段
+    for field, (env_key, is_secret) in _ENV_FIELD_MAP.items():
+        raw = getattr(settings, env_key, "") or ""
+        result[field] = _mask(raw) if is_secret and raw else raw
+
+    # config.json 字段
+    for field, (path, _) in _JSON_FIELD_MAP.items():
+        result[field] = _get_nested(cfg, path)
+
+    return result
+
+
+@router.put("/settings")
+def update_settings(
+    updates: Dict[str, Any],
+    _: AdminUser = Depends(get_current_admin),
+):
+    """更新配置项：写入 .env / config.json 并热更新内存 settings"""
+    from utils.config_manager import (
+        write_env_keys, read_config_json, write_config_json,
+        set_nested, apply_to_settings,
+    )
+
+    env_updates: Dict[str, str] = {}
+    cfg = None  # 懒加载 config.json
+
+    for field, value in updates.items():
+        # .env 字段
+        if field in _ENV_FIELD_MAP:
+            env_key, is_secret = _ENV_FIELD_MAP[field]
+            if is_secret and _is_masked(str(value)):
+                continue  # 前端回传脱敏占位符，不更新
+            env_updates[env_key] = str(value)
+
+        # config.json 字段
+        elif field in _JSON_FIELD_MAP:
+            if cfg is None:
+                cfg = read_config_json()
+            path, typ = _JSON_FIELD_MAP[field]
+            set_nested(cfg, path, _cast(value, typ))
+
+    errors = []
+    if env_updates:
+        if not write_env_keys(env_updates):
+            errors.append(".env 写入失败")
+        else:
+            apply_to_settings(env_updates)
+
+    if cfg is not None:
+        if not write_config_json(cfg):
+            errors.append("config.json 写入失败")
+
+    if errors:
+        raise HTTPException(status_code=500, detail="; ".join(errors))
+
+    return {"message": f"已更新 {len(updates)} 项配置", "updated": list(updates.keys())}
+
+
 # ── 手动触发定时任务 ───────────────────────────────────
 
 VALID_JOBS = {
@@ -182,14 +337,13 @@ def trigger_job(
             if job_id == "fetch_rsoe_data":
                 from core.task_scheduler import job_fetch_rsoe
                 job_fetch_rsoe()
-            elif job_id == "process_pool":
+            elif job_id == "process_pool" or job_id == "check_gee_tasks":
                 from core.task_scheduler import job_process_pool
                 job_process_pool()
             elif job_id == "release_timeout_locks":
                 from core.task_scheduler import job_release_locks
                 job_release_locks()
             elif job_id == "generate_daily_report":
-                from datetime import date
                 from core.task_scheduler import job_generate_report
                 job_generate_report()
         finally:

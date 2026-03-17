@@ -115,9 +115,10 @@ class RsoeSpider:
                 "sub_id": sub_id,
                 "title": props.get("title", "Unknown Event"),
                 "category": props.get("category", "Unknown"),
+                "category_name": props.get("categoryName") or CATEGORY_MAP.get(props.get("category", "Unknown"), props.get("category", "Unknown")),
                 "severity": props.get("severity", "medium"),
-                "country": props.get("country", ""),
-                "continent": props.get("continent", ""),
+                "country": props.get("country") or props.get("countryName", ""),
+                "continent": props.get("continent") or props.get("continentName", ""),
                 "longitude": coords[0] if len(coords) >= 2 else None,
                 "latitude": coords[1] if len(coords) >= 2 else None,
                 "event_date": props.get("eventDate"),
@@ -196,7 +197,7 @@ class RsoeSpider:
 
     def fetch_event_detail(self, event_id: int, sub_id: int = 0) -> Optional[Dict]:
         """从 RSOE API 获取事件详情，含坐标"""
-        url = f"{self.EVENT_API_URL}/{event_id}/{sub_id}"
+        url = f"{self.EVENT_DETAIL_API}/{event_id}/{sub_id}"
         try:
             resp = requests.get(
                 url,
@@ -207,11 +208,19 @@ class RsoeSpider:
             resp.raise_for_status()
             data = resp.json()
 
-            lon, lat = self._extract_coords(data)
-            continent = data.get("continent") or data.get("affectedRegion", "")
-            address = data.get("address") or data.get("location") or ""
-            last_update_str = data.get("lastUpdated") or data.get("updateTime")
-            last_update = self._parse_date(last_update_str) if last_update_str else None
+            if data.get("errorCode") not in (None, 0):
+                logger.warning(f"RSOE 详情接口返回错误 {event_id}/{sub_id}: {data.get('errorMessage')}")
+                return None
+
+            features = data.get("features") or []
+            feature = features[0] if features else {}
+            props = feature.get("properties") or {}
+            geometry = feature.get("geometry") or {}
+
+            lon, lat = self._extract_coords(feature if feature else data)
+            continent = props.get("continent") or props.get("continentName") or data.get("affectedRegion", "")
+            address = props.get("address") or props.get("location") or data.get("location") or ""
+            last_update = props.get("lastUpdate") or data.get("lastUpdate")
 
             return {
                 "longitude": lon,
@@ -220,6 +229,13 @@ class RsoeSpider:
                 "address": address,
                 "last_update": last_update,
                 "details_json": data,
+                "geometry_type": geometry.get("type"),
+                "title": props.get("title"),
+                "category": props.get("category"),
+                "category_name": props.get("categoryName"),
+                "country": props.get("country") or props.get("countryName"),
+                "severity": props.get("severity"),
+                "event_date": props.get("eventDate"),
             }
         except Exception as e:
             logger.error(f"获取事件详情失败 {event_id}/{sub_id}: {e}")

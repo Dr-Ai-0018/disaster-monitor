@@ -65,12 +65,25 @@ class Settings:
             os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "1440")
         )
 
+        # 初始化默认管理员 / GPU Worker Token
+        self.SEED_ADMIN_ENABLED = os.getenv("SEED_ADMIN_ENABLED", "true").lower() == "true"
+        self.SEED_ADMIN_USERNAME = os.getenv("SEED_ADMIN_USERNAME", "user-707")
+        self.SEED_ADMIN_PASSWORD = os.getenv("SEED_ADMIN_PASSWORD", "srgYJKmvr953yj")
+        self.SEED_ADMIN_EMAIL = os.getenv("SEED_ADMIN_EMAIL", "0example@killerbest.com")
+        self.SEED_ADMIN_FULL_NAME = os.getenv("SEED_ADMIN_FULL_NAME", "System Administrator")
+        self.SEED_GPU_TOKEN_ENABLED = os.getenv("SEED_GPU_TOKEN_ENABLED", "true").lower() == "true"
+        self.SEED_GPU_TOKEN_NAME = os.getenv("SEED_GPU_TOKEN_NAME", "GPU-Server-1")
+        self.SEED_GPU_TOKEN_DESCRIPTION = os.getenv("SEED_GPU_TOKEN_DESCRIPTION", "内网GPU服务器访问令牌")
+        self.SEED_GPU_TOKEN_VALUE = os.getenv("SEED_GPU_TOKEN_VALUE", "gpu-server-local-token")
+
         # 服务器
         self.SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
         self.SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
         self.SERVER_WORKERS = int(os.getenv("SERVER_WORKERS", "4"))
         self.REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))
         self.REQUEST_DELAY = float(os.getenv("REQUEST_DELAY", "1.5"))
+        # GPU Worker 访问卫星影像的服务器基础 URL（生产环境必须设置，如 https://api.example.com）
+        self.SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "")
 
         cors_str = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:8000")
         self.CORS_ORIGINS: List[str] = [o.strip() for o in cors_str.split(",") if o.strip()]
