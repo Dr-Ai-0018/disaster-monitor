@@ -3,12 +3,13 @@
 """
 import json
 import math
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
-from models.models import AdminUser, Event, get_db
+from models.models import AdminUser, Event, GeeTask, get_db
 from schemas.schemas import (
     EventListResponse, EventSummary, EventDetail, EventStatsResponse, MessageResponse
 )
@@ -17,7 +18,42 @@ from utils.auth import get_current_admin
 router = APIRouter(prefix="/api/events", tags=["事件管理"])
 
 
-def _event_to_summary(e: Event) -> EventSummary:
+def _build_imagery_count_map(db: Session, uuids: List[str]) -> dict[str, dict[str, int]]:
+    if not uuids:
+        return {}
+
+    rows = (
+        db.query(GeeTask.uuid, GeeTask.task_type, func.count(GeeTask.id))
+        .filter(
+            GeeTask.uuid.in_(uuids),
+            GeeTask.status == "COMPLETED",
+            GeeTask.task_type.in_(["pre_disaster", "post_disaster"]),
+        )
+        .group_by(GeeTask.uuid, GeeTask.task_type)
+        .all()
+    )
+
+    result: dict[str, dict[str, int]] = {}
+    for uuid, task_type, count in rows:
+        if uuid not in result:
+            result[uuid] = {"pre": 0, "post": 0}
+        if task_type == "pre_disaster":
+            result[uuid]["pre"] = int(count or 0)
+        elif task_type == "post_disaster":
+            result[uuid]["post"] = int(count or 0)
+    return result
+
+
+def _event_to_summary(e: Event, imagery_counts: Optional[dict[str, int]] = None) -> EventSummary:
+    imagery_counts = imagery_counts or {}
+    pre_count = int(imagery_counts.get("pre", 0) or 0)
+    post_count = int(imagery_counts.get("post", 0) or 0)
+    # 兼容旧数据: 事件表已标记下载成功，但 gee_tasks 没有历史记录
+    if bool(e.pre_image_downloaded) and pre_count == 0:
+        pre_count = 1
+    if bool(e.post_image_downloaded) and post_count == 0:
+        post_count = 1
+
     return EventSummary(
         uuid=e.uuid,
         event_id=e.event_id,
@@ -42,10 +78,22 @@ def _event_to_summary(e: Event) -> EventSummary:
         post_window_days=getattr(e, "post_window_days", 7),
         post_imagery_open=bool(getattr(e, "post_imagery_open", 1)),
         imagery_check_count=getattr(e, "imagery_check_count", 0) or 0,
+        pre_imagery_count=pre_count,
+        post_imagery_count=post_count,
+        has_pre_image=bool(e.pre_image_path),
+        has_post_image=bool(e.post_image_path),
     )
 
 
-def _event_to_detail(e: Event) -> EventDetail:
+def _event_to_detail(e: Event, imagery_counts: Optional[dict[str, int]] = None) -> EventDetail:
+    imagery_counts = imagery_counts or {}
+    pre_count = int(imagery_counts.get("pre", 0) or 0)
+    post_count = int(imagery_counts.get("post", 0) or 0)
+    if bool(e.pre_image_downloaded) and pre_count == 0:
+        pre_count = 1
+    if bool(e.post_image_downloaded) and post_count == 0:
+        post_count = 1
+
     qa = None
     if e.quality_assessment:
         try:
@@ -99,6 +147,10 @@ def _event_to_detail(e: Event) -> EventDetail:
         pre_imagery_exhausted=bool(getattr(e, "pre_imagery_exhausted", 0)),
         pre_imagery_last_check=getattr(e, "pre_imagery_last_check", None),
         post_imagery_last_check=getattr(e, "post_imagery_last_check", None),
+        pre_imagery_count=pre_count,
+        post_imagery_count=post_count,
+        has_pre_image=bool(e.pre_image_path),
+        has_post_image=bool(e.post_image_path),
     )
 
 
@@ -135,12 +187,14 @@ def list_events(
     total = q.count()
     events = q.order_by(Event.event_date.desc()).offset((page - 1) * limit).limit(limit).all()
 
+    imagery_count_map = _build_imagery_count_map(db, [e.uuid for e in events])
+
     return EventListResponse(
         total=total,
         page=page,
         limit=limit,
         pages=math.ceil(total / limit) if total else 0,
-        data=[_event_to_summary(e) for e in events],
+        data=[_event_to_summary(e, imagery_count_map.get(e.uuid)) for e in events],
     )
 
 
@@ -149,8 +203,6 @@ def get_stats(
     db: Session = Depends(get_db),
     _: AdminUser = Depends(get_current_admin),
 ):
-    from sqlalchemy import func
-
     all_events = db.query(Event).all()
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     day_ms = 86400 * 1000
@@ -210,7 +262,8 @@ def get_event(
     event = db.query(Event).filter(Event.uuid == uuid).first()
     if not event:
         raise HTTPException(status_code=404, detail="事件不存在")
-    return _event_to_detail(event)
+    imagery_count_map = _build_imagery_count_map(db, [event.uuid])
+    return _event_to_detail(event, imagery_count_map.get(event.uuid))
 
 
 @router.post("/{uuid}/process", response_model=MessageResponse)

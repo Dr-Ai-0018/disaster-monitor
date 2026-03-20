@@ -189,6 +189,10 @@
                     <i data-lucide="alert-circle" class="w-4 h-4"></i>
                     <span>事件管理</span>
                 </a>
+                <a href="#" class="nav-item flex items-center gap-3 px-4 py-3 font-mono text-xs font-bold tracking-widest uppercase text-gray-600 hover:bg-gray-100 hover:text-black transition-colors" data-view="tasks">
+                    <i data-lucide="cpu" class="w-4 h-4"></i>
+                    <span>任务进度</span>
+                </a>
                 <a href="#" class="nav-item flex items-center gap-3 px-4 py-3 font-mono text-xs font-bold tracking-widest uppercase text-gray-600 hover:bg-gray-100 hover:text-black transition-colors" data-view="products">
                     <i data-lucide="package" class="w-4 h-4"></i>
                     <span>成品池</span>
@@ -365,7 +369,7 @@
                                     <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">状态</div>
                                     <select id="track-filter-status" onchange="window.loadTrack(1)" class="px-3 py-2 border border-gray-200 font-mono text-xs bg-white focus:outline-none focus:border-black">
                                         <option value="">全部</option>
-                                        <option value="pending">待处理</option><option value="pool">事件池</option><option value="checked">已质检</option><option value="queued">已入队</option><option value="processing">处理中</option><option value="completed">已完成</option>
+                                        <option value="pending">待处理</option><option value="pool">事件池</option><option value="checked">已质检</option><option value="queued">已入队</option><option value="processing">处理中</option><option value="completed">已完成</option><option value="failed">失败</option>
                                     </select>
                                 </div>
                                 <div>
@@ -392,8 +396,9 @@
                                             <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">标题</th>
                                             <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">国家</th>
                                             <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">状态</th>
-                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">影像</th>
-                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">检查次数</th>
+                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">影像进度</th>
+                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">检查/抓取</th>
+                                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">影像入口</th>
                                             <th class="py-3 px-4 text-right font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">操作</th>
                                         </tr>
                                     </thead>
@@ -415,7 +420,7 @@
                             <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">状态</div>
                             <select id="ev-filter-status" onchange="window.loadEvents(1)" class="px-3 py-2 border border-gray-200 font-mono text-xs bg-white focus:outline-none focus:border-black">
                                 <option value="">全部</option>
-                                <option value="pending">待处理</option><option value="pool">事件池</option><option value="checked">已质检</option><option value="queued">已入队</option><option value="processing">处理中</option><option value="completed">已完成</option>
+                                <option value="pending">待处理</option><option value="pool">事件池</option><option value="checked">已质检</option><option value="queued">已入队</option><option value="processing">处理中</option><option value="completed">已完成</option><option value="failed">失败</option>
                             </select>
                         </div>
                         <div>
@@ -451,8 +456,9 @@
                                         <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">国家</th>
                                         <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">状态</th>
                                         <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">严重程度</th>
-                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">影像</th>
-                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">检查次数</th>
+                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">影像进度</th>
+                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">检查/抓取</th>
+                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">影像入口</th>
                                         <th class="py-3 px-4 text-right font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">操作</th>
                                     </tr>
                                 </thead>
@@ -460,6 +466,68 @@
                             </table>
                         </div>
                         <div class="p-4 border-t border-gray-100 flex items-center justify-between" id="events-pagination"></div>
+                    </div>
+                </div>
+
+                <!-- Task Progress 视图 -->
+                <div class="hidden space-y-6" id="view-tasks">
+                    <div class="flex flex-col gap-4 xl:flex-row xl:justify-between xl:items-center">
+                        <div>
+                            <h2 class="font-mono text-2xl font-bold tracking-widest">任务进度</h2>
+                            <p class="font-mono text-[11px] text-gray-500 mt-2 leading-5">这里跟踪 GPU 推理任务。运行中的任务点击暂停后，会在当前子步骤完成后停下；点击继续会从头重新执行当前任务。</p>
+                        </div>
+                        <button onclick="window.loadTaskProgress(1)" class="px-4 py-2 border border-gray-200 font-mono text-xs font-bold tracking-widest uppercase hover:bg-gray-100">
+                            <i data-lucide="refresh-cw" class="w-3 h-3 inline-block mr-1"></i>刷新
+                        </button>
+                    </div>
+
+                    <div class="tech-card p-4 bg-white">
+                        <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-2">控制说明</div>
+                        <div class="font-mono text-[11px] leading-6 text-gray-600">
+                            失败会自动重试最多 3 次，超过上限后自动停止；只有手动点击“继续”，任务才会重新排队。暂停中的任务不会再被 Worker 拉取；“暂停请求中”时点击“取消暂停”会让当前 Worker 继续跑完。
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap gap-3 items-end">
+                        <div>
+                            <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">任务状态</div>
+                            <select id="task-filter-status" onchange="window.loadTaskProgress(1)" class="px-3 py-2 border border-gray-200 font-mono text-xs bg-white focus:outline-none focus:border-black">
+                                <option value="">全部</option>
+                                <option value="pending">待执行</option>
+                                <option value="locked">执行中</option>
+                                <option value="pause_requested">暂停请求中</option>
+                                <option value="paused">已暂停</option>
+                                <option value="completed">已完成</option>
+                                <option value="failed">已停止</option>
+                            </select>
+                        </div>
+                        <div>
+                            <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">搜索</div>
+                            <input id="task-filter-keyword" oninput="window.loadTaskProgress(1)" type="text" placeholder="UUID / 标题 / 国家" class="px-3 py-2 border border-gray-200 font-mono text-xs focus:outline-none focus:border-black w-56">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 md:grid-cols-5 gap-4" id="tasks-stats-row"></div>
+
+                    <div class="tech-card p-0 overflow-hidden">
+                        <div class="overflow-x-auto admin-table-wrap">
+                            <table class="w-full">
+                                <thead>
+                                    <tr class="border-b border-gray-100 bg-gray-50">
+                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">事件</th>
+                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">任务状态</th>
+                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">当前阶段</th>
+                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">进度</th>
+                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">Worker / 心跳</th>
+                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">重试</th>
+                                        <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">更新时间</th>
+                                        <th class="py-3 px-4 text-right font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tasks-tbody" class="font-mono text-xs"></tbody>
+                            </table>
+                        </div>
+                        <div class="p-4 border-t border-gray-100 flex items-center justify-between" id="tasks-pagination"></div>
                     </div>
                 </div>
 

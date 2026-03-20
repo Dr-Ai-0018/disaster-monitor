@@ -60,6 +60,10 @@ class EventSummary(BaseModel):
     post_window_days: Optional[int] = 7
     post_imagery_open: Optional[bool] = True
     imagery_check_count: Optional[int] = 0
+    pre_imagery_count: Optional[int] = 0
+    post_imagery_count: Optional[int] = 0
+    has_pre_image: Optional[bool] = False
+    has_post_image: Optional[bool] = False
 
     class Config:
         from_attributes = True
@@ -138,6 +142,7 @@ class HeartbeatResponse(BaseModel):
     uuid: str
     heartbeat: int
     locked_until: int
+    should_pause: bool = False
 
 
 class InferenceTaskResult(BaseModel):
@@ -183,7 +188,47 @@ class TaskStatusResponse(BaseModel):
     locked_until: Optional[int]
     heartbeat: Optional[int]
     retry_count: int
+    max_retries: int = 3
+    pause_requested: bool = False
+    progress_stage: Optional[str] = None
+    progress_message: Optional[str] = None
+    progress_percent: int = 0
+    current_step: int = 0
+    total_steps: int = 0
     created_at: int
+
+
+class TaskProgressUpdateRequest(BaseModel):
+    worker_id: str
+    stage: str
+    message: str
+    current_step: int = 0
+    total_steps: int = 0
+    progress_percent: Optional[int] = None
+    step_details: Optional[Any] = None
+
+
+class TaskProgressUpdateResponse(BaseModel):
+    message: str
+    uuid: str
+    should_pause: bool = False
+    progress_percent: int = 0
+    current_step: int = 0
+    total_steps: int = 0
+
+
+class TaskPauseAckRequest(BaseModel):
+    worker_id: str
+    message: Optional[str] = None
+    current_step: int = 0
+    total_steps: int = 0
+    step_details: Optional[Any] = None
+
+
+class TaskPauseAckResponse(BaseModel):
+    message: str
+    uuid: str
+    status: str
 
 
 # ──────────────────────────────────────────
@@ -296,6 +341,64 @@ class TokenListItem(BaseModel):
     usage_count: int
     last_used: Optional[int]
     created_at: int
+
+
+class TaskProgressSummary(BaseModel):
+    uuid: str
+    event_title: Optional[str]
+    event_country: Optional[str]
+    event_category: Optional[str]
+    event_severity: Optional[str]
+    event_status: Optional[str]
+    task_status: str
+    progress_stage: Optional[str]
+    progress_message: Optional[str]
+    progress_percent: int = 0
+    current_step: int = 0
+    total_steps: int = 0
+    task_count: int = 0
+    completed_task_count: int = 0
+    failed_task_count: int = 0
+    running_task_label: Optional[str]
+    retry_count: int = 0
+    max_retries: int = 3
+    manual_resume_count: int = 0
+    pause_requested: bool = False
+    locked_by: Optional[str]
+    locked_at: Optional[int]
+    locked_until: Optional[int]
+    heartbeat: Optional[int]
+    failure_reason: Optional[str]
+    created_at: int
+    updated_at: int
+    completed_at: Optional[int]
+    can_pause: bool = False
+    can_resume: bool = False
+
+
+class TaskProgressDetail(TaskProgressSummary):
+    task_data: Optional[Any]
+    step_details: Optional[Any]
+    inference_result: Optional[Any]
+    last_error_details: Optional[str]
+
+
+class TaskProgressListResponse(BaseModel):
+    total: int
+    page: int
+    limit: int
+    pages: int
+    data: List[TaskProgressSummary]
+
+
+class TaskProgressStatsResponse(BaseModel):
+    total: int
+    by_status: Dict[str, int]
+    active: int
+    pause_requested: int
+    paused: int
+    completed: int
+    failed: int
 
 
 # ──────────────────────────────────────────

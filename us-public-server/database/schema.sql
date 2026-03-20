@@ -101,6 +101,16 @@ CREATE TABLE IF NOT EXISTS task_queue (
     retry_count INTEGER DEFAULT 0,
     max_retries INTEGER DEFAULT 3,
     failure_reason TEXT,
+    last_error_details TEXT,
+    progress_stage TEXT DEFAULT 'queued',
+    progress_message TEXT,
+    progress_percent INTEGER DEFAULT 0,
+    current_step INTEGER DEFAULT 0,
+    total_steps INTEGER DEFAULT 0,
+    step_details TEXT,
+    pause_requested INTEGER DEFAULT 0,
+    paused_at INTEGER,
+    manual_resume_count INTEGER DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     completed_at INTEGER,
@@ -112,6 +122,7 @@ CREATE INDEX IF NOT EXISTS idx_task_queue_priority ON task_queue(priority DESC);
 CREATE INDEX IF NOT EXISTS idx_task_queue_locked_until ON task_queue(locked_until);
 CREATE INDEX IF NOT EXISTS idx_task_queue_locked_by ON task_queue(locked_by);
 CREATE INDEX IF NOT EXISTS idx_task_queue_created_at ON task_queue(created_at);
+CREATE INDEX IF NOT EXISTS idx_task_queue_pause_requested ON task_queue(pause_requested);
 
 -- 4. 成品池表
 CREATE TABLE IF NOT EXISTS products (

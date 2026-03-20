@@ -10,6 +10,7 @@ const EVENTS_API = `${API_BASE}/api/events`;
 const POOL_API = `${API_BASE}/api/pool`;
 const PRODUCTS_API = `${API_BASE}/api/products`;
 const REPORTS_API = `${API_BASE}/api/reports`;
+const TASKS_API = `${ADMIN_API}/tasks`;
 
 let AUTH_TOKEN = localStorage.getItem('admin_token') || '';
 
@@ -17,6 +18,7 @@ let AUTH_TOKEN = localStorage.getItem('admin_token') || '';
 let _eventsPage = 1;
 let _rawPoolPage = 1;
 let _trackPage = 1;
+let _tasksPage = 1;
 let _productsPage = 1;
 let _reportsPage = 1;
 
@@ -43,6 +45,28 @@ const TOAST_TYPE_LABELS = {
     info: '提示'
 };
 
+const TASK_STATUS_LABELS = {
+    pending: '待执行',
+    locked: '执行中',
+    pause_requested: '暂停请求中',
+    paused: '已暂停',
+    completed: '已完成',
+    failed: '已停止'
+};
+
+const TASK_STAGE_LABELS = {
+    queued: '等待 Worker 拉取',
+    claimed: 'Worker 已接单',
+    downloading_pre: '下载灾前影像',
+    downloading_post: '下载灾后影像',
+    inferencing: '执行模型推理',
+    submitting: '提交推理结果',
+    pause_requested: '等待暂停',
+    paused: '已暂停',
+    completed: '已完成',
+    failed: '已停止'
+};
+
 const JOB_LABELS = {
     fetch_rsoe_data: '抓取 RSOE 数据',
     process_pool: '处理事件池',
@@ -54,6 +78,7 @@ const VIEW_LABELS = {
     dashboard: '系统概览',
     pool: '事件池',
     events: '事件管理',
+    tasks: '任务进度',
     products: '成品池',
     reports: '灾害日报',
     tokens: 'API 令牌',
@@ -192,6 +217,7 @@ function switchView(view) {
         case 'dashboard': loadDashboard(); break;
         case 'pool': loadPool(); break;
         case 'events': loadEvents(1); break;
+        case 'tasks': loadTaskProgress(1); break;
         case 'products': loadProducts(); break;
         case 'reports': loadReports(); break;
         case 'tokens': loadTokens(); break;
@@ -528,12 +554,13 @@ async function loadTrack(page = 1) {
                 <td class="py-3 px-4 text-gray-600 uppercase">${escapeHtml(ev.country || '暂无')}</td>
                 <td class="py-3 px-4"><span class="px-2 py-0.5 bg-gray-100 text-gray-700 text-[10px] font-bold uppercase">${labelStatus(ev.status)}</span></td>
                 <td class="py-3 px-4">${formatImageryStatus(ev)}</td>
-                <td class="py-3 px-4 text-gray-500">${ev.imagery_check_count ?? 0}</td>
+                <td class="py-3 px-4">${formatImageryCounts(ev)}</td>
+                <td class="py-3 px-4">${renderImageryEntry(ev)}</td>
                 <td class="py-3 px-4 text-right">
                     ${renderProcessButton(ev)}
                 </td>
             </tr>
-        `).join('') || '<tr><td colspan="6" class="py-12 text-center text-gray-400 font-mono text-xs uppercase">暂无数据</td></tr>';
+        `).join('') || '<tr><td colspan="7" class="py-12 text-center text-gray-400 font-mono text-xs uppercase">暂无数据</td></tr>';
 
         renderPagination('track-pagination', data.page, data.pages, loadTrack);
     } catch(e) {
@@ -579,13 +606,14 @@ async function loadEvents(page = 1) {
                 <td class="py-3 px-4"><span class="px-2 py-0.5 bg-gray-100 text-gray-700 text-[10px] font-bold uppercase">${labelStatus(event.status)}</span></td>
                 <td class="py-3 px-4"><span class="px-2 py-0.5 ${getSeverityClass(event.severity)} text-[10px] font-bold uppercase">${labelSeverity(event.severity)}</span></td>
                 <td class="py-3 px-4">${formatImageryStatus(event)}</td>
-                <td class="py-3 px-4 text-gray-500">${event.imagery_check_count ?? 0}</td>
+                <td class="py-3 px-4">${formatImageryCounts(event)}</td>
+                <td class="py-3 px-4">${renderImageryEntry(event)}</td>
                 <td class="py-3 px-4 text-right">
                     <button onclick="window.showEventDetail('${event.uuid}')" class="px-2 py-1 border border-gray-200 hover:border-black font-mono text-[10px] font-bold uppercase mr-1">详情</button>
                     ${renderProcessButton(event)}
                 </td>
             </tr>
-        `).join('') || '<tr><td colspan="7" class="py-12 text-center text-gray-400 font-mono text-xs uppercase">暂无事件</td></tr>';
+        `).join('') || '<tr><td colspan="8" class="py-12 text-center text-gray-400 font-mono text-xs uppercase">暂无事件</td></tr>';
 
         renderPagination('events-pagination', data.page, data.pages, loadEvents);
         lucide.createIcons();
@@ -635,6 +663,21 @@ async function showEventDetail(uuid) {
                         <div class="flex gap-3 items-start"><span class="text-gray-500 w-14 shrink-0">灾后:</span><span>${postStatus}</span></div>
                     </div>
                 </div>
+                <div class="border-t border-gray-100 pt-4">
+                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">影像数量与入口</div>
+                    <div class="grid grid-cols-2 gap-3 mb-3">
+                        <div><span class="text-gray-500 uppercase">灾前成功抓取</span><div class="font-bold mt-1">${ev.pre_imagery_count ?? (ev.pre_image_downloaded ? 1 : 0)} 张</div></div>
+                        <div><span class="text-gray-500 uppercase">灾后成功抓取</span><div class="font-bold mt-1">${ev.post_imagery_count ?? (ev.post_image_downloaded ? 1 : 0)} 张</div></div>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        ${ev.has_pre_image ? `<a href="/api/public/image/${encodeURIComponent(ev.uuid)}/pre" target="_blank" rel="noopener noreferrer" class="px-2 py-1 border border-gray-300 hover:border-black hover:bg-gray-100 transition-colors font-mono text-[10px] font-bold uppercase">查看灾前影像</a>` : `<span class="px-2 py-1 border border-gray-200 text-gray-400 font-mono text-[10px] font-bold uppercase">灾前无入口</span>`}
+                        ${ev.has_post_image ? `<a href="/api/public/image/${encodeURIComponent(ev.uuid)}/post" target="_blank" rel="noopener noreferrer" class="px-2 py-1 border border-gray-300 hover:border-black hover:bg-gray-100 transition-colors font-mono text-[10px] font-bold uppercase">查看灾后影像</a>` : `<span class="px-2 py-1 border border-gray-200 text-gray-400 font-mono text-[10px] font-bold uppercase">灾后无入口</span>`}
+                    </div>
+                </div>
+                <div class="border-t border-gray-100 pt-4">
+                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">推理任务</div>
+                    <button onclick="window.jumpToTaskProgress('${ev.uuid}')" class="px-2 py-1 border border-gray-300 hover:border-black hover:bg-gray-100 transition-colors font-mono text-[10px] font-bold uppercase">查看任务进度</button>
+                </div>
                 ${ev.quality_checked ? `
                 <div class="border-t border-gray-100 pt-4">
                     <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">质量评估</div>
@@ -671,6 +714,7 @@ function renderEventStatsRow(stats) {
         ['已质检', byStatus.checked ?? 0],
         ['处理中', byStatus.processing ?? 0],
         ['已完成', byStatus.completed ?? 0],
+        ['失败停住', byStatus.failed ?? 0],
     ].map(([label, value]) => `
         <div class="tech-card p-4">
             <div class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold mb-2">${label}</div>
@@ -702,37 +746,363 @@ function formatImageryStatus(event) {
     return `<div class="flex gap-1">${preBadge}${postBadge}</div>`;
 }
 
+function formatImageryCounts(event) {
+    const checks = event.imagery_check_count ?? 0;
+    const preCount = event.pre_imagery_count ?? (event.pre_image_downloaded ? 1 : 0);
+    const postCount = event.post_imagery_count ?? (event.post_image_downloaded ? 1 : 0);
+    return `
+        <div class="font-mono text-[10px] leading-5 text-gray-600">
+            <div>检查: <span class="font-bold text-gray-800">${checks}</span> 次</div>
+            <div>抓取: <span class="font-bold text-gray-800">前 ${preCount}</span> / <span class="font-bold text-gray-800">后 ${postCount}</span></div>
+        </div>
+    `;
+}
+
+function renderImageryEntry(event) {
+    const preLink = event?.has_pre_image
+        ? `<a href="/api/public/image/${encodeURIComponent(event.uuid)}/pre" target="_blank" rel="noopener noreferrer" class="inline-flex px-2 py-1 border border-gray-300 hover:border-black hover:bg-gray-100 transition-colors font-mono text-[10px] font-bold uppercase mr-1">前图</a>`
+        : `<span class="inline-flex px-2 py-1 border border-gray-200 text-gray-400 font-mono text-[10px] font-bold uppercase mr-1">前图无</span>`;
+
+    const postLink = event?.has_post_image
+        ? `<a href="/api/public/image/${encodeURIComponent(event.uuid)}/post" target="_blank" rel="noopener noreferrer" class="inline-flex px-2 py-1 border border-gray-300 hover:border-black hover:bg-gray-100 transition-colors font-mono text-[10px] font-bold uppercase">后图</a>`
+        : `<span class="inline-flex px-2 py-1 border border-gray-200 text-gray-400 font-mono text-[10px] font-bold uppercase">后图无</span>`;
+
+    return `<div class="whitespace-nowrap">${preLink}${postLink}</div>`;
+}
+
 function canProcessEvent(status) {
     return ['pending', 'pool', 'checked'].includes(String(status || '').toLowerCase());
 }
 
 function renderProcessButton(event) {
     if (!canProcessEvent(event?.status)) {
-        return '<span class="inline-flex px-2 py-1 border border-gray-200 text-gray-400 font-mono text-[10px] font-bold uppercase cursor-not-allowed">不可推进</span>';
+        return '<span title="当前状态由调度器自动流转" class="inline-flex px-2 py-1 border border-gray-200 text-gray-400 font-mono text-[10px] font-bold uppercase cursor-not-allowed">自动流转</span>';
     }
-    return `<button onclick="window.processEvent('${event.uuid}', '${event.status}')" class="px-2 py-1 border border-gray-300 hover:border-black hover:bg-black hover:text-white transition-colors font-mono text-[10px] font-bold uppercase">推进</button>`;
+    return `<button title="手动触发一次该事件的处理流程（pending/pool/checked）" onclick="window.processEvent('${event.uuid}', '${event.status}')" class="px-2 py-1 border border-gray-300 hover:border-black hover:bg-black hover:text-white transition-colors font-mono text-[10px] font-bold uppercase">触发处理</button>`;
 }
 
 async function processEvent(uuid, status = '') {
     if (!canProcessEvent(status)) {
-        showToast(`当前状态 ${labelStatus(status)} 不支持手动推进`, 'info');
+        showToast(`当前状态 ${labelStatus(status)} 由系统自动流转，无需手动触发`, 'info');
         return;
     }
     showLoading(true);
     try {
         const response = await authFetch(`${EVENTS_API}/${uuid}/process`, { method: 'POST' });
         if (response.ok) {
-            showToast('已触发事件推进', 'success');
+            showToast('已手动触发处理流程', 'success');
             setTimeout(() => loadEvents(_eventsPage), 2000);
         } else {
             const err = await response.json().catch(() => ({ detail: response.statusText }));
             throw new Error(err.detail || response.statusText);
         }
     } catch (error) {
-        showToast('推进事件失败: ' + error.message, 'error');
+        showToast('触发处理失败: ' + error.message, 'error');
     } finally {
         showLoading(false);
     }
+}
+
+// ==================== Task Progress ====================
+async function loadTaskProgress(page = 1) {
+    _tasksPage = page;
+    showLoading(true);
+
+    const status = document.getElementById('task-filter-status')?.value || '';
+    const keyword = document.getElementById('task-filter-keyword')?.value?.trim() || '';
+
+    let url = `${TASKS_API}?page=${page}&limit=20`;
+    if (status) url += `&status=${encodeURIComponent(status)}`;
+    if (keyword) url += `&keyword=${encodeURIComponent(keyword)}`;
+
+    try {
+        const [response, statsResponse] = await Promise.all([
+            authFetch(url),
+            authFetch(`${TASKS_API}/stats`)
+        ]);
+        if (!response.ok) throw new Error(`HTTP_${response.status}`);
+
+        const data = await response.json();
+        const stats = statsResponse.ok ? await statsResponse.json() : null;
+        const tasks = data.data || [];
+
+        renderTaskStatsRow(stats);
+
+        const tbody = document.getElementById('tasks-tbody');
+        tbody.innerHTML = tasks.map(task => `
+            <tr class="border-b border-gray-100 hover:bg-gray-50 ${task.pause_requested ? 'bg-amber-50/50' : ''}">
+                <td class="py-3 px-4 align-top">
+                    <div class="font-semibold max-w-xs truncate" title="${escapeHtml(task.event_title || task.uuid)}">${escapeHtml(task.event_title || '未命名事件')}</div>
+                    <div class="text-[10px] text-gray-500 mt-1">${escapeHtml(task.uuid)}</div>
+                    <div class="text-[10px] text-gray-400 mt-1">${escapeHtml(task.event_country || '暂无国家')} / ${escapeHtml(task.event_category || '暂无类别')}</div>
+                </td>
+                <td class="py-3 px-4 align-top">${renderTaskStatusCell(task)}</td>
+                <td class="py-3 px-4 align-top">${renderTaskStageCell(task)}</td>
+                <td class="py-3 px-4 align-top">${renderTaskProgressCell(task)}</td>
+                <td class="py-3 px-4 align-top">${renderTaskWorkerCell(task)}</td>
+                <td class="py-3 px-4 align-top">${renderTaskRetryCell(task)}</td>
+                <td class="py-3 px-4 align-top text-gray-600">
+                    <div>${formatDateTime(task.updated_at)}</div>
+                    <div class="text-[10px] text-gray-400 mt-1">创建: ${formatDateTime(task.created_at)}</div>
+                </td>
+                <td class="py-3 px-4 align-top text-right whitespace-nowrap">
+                    <button onclick="window.showTaskProgressDetail('${task.uuid}')" class="px-2 py-1 border border-gray-200 hover:border-black font-mono text-[10px] font-bold uppercase mr-1">详情</button>
+                    ${task.can_pause ? `<button onclick="window.pauseTaskProgress('${task.uuid}')" class="px-2 py-1 border border-amber-300 text-amber-700 hover:border-amber-500 hover:bg-amber-50 font-mono text-[10px] font-bold uppercase mr-1">暂停</button>` : ''}
+                    ${task.can_resume ? `<button onclick="window.resumeTaskProgress('${task.uuid}')" class="px-2 py-1 border border-green-300 text-green-700 hover:border-green-500 hover:bg-green-50 font-mono text-[10px] font-bold uppercase">${task.task_status === 'pause_requested' ? '取消暂停' : '继续'}</button>` : ''}
+                </td>
+            </tr>
+        `).join('') || '<tr><td colspan="8" class="py-12 text-center text-gray-400 font-mono text-xs uppercase">暂无任务</td></tr>';
+
+        renderPagination('tasks-pagination', data.page, data.pages, loadTaskProgress);
+        lucide.createIcons();
+    } catch (error) {
+        console.error('Task progress load failed:', error);
+        showToast('加载任务进度失败', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+function renderTaskStatsRow(stats) {
+    const el = document.getElementById('tasks-stats-row');
+    if (!el) return;
+    const byStatus = stats?.by_status || {};
+    el.innerHTML = [
+        ['全部任务', stats?.total ?? '—'],
+        ['活跃中', stats?.active ?? 0],
+        ['暂停请求', stats?.pause_requested ?? byStatus.pause_requested ?? 0],
+        ['已暂停', stats?.paused ?? byStatus.paused ?? 0],
+        ['已停止', stats?.failed ?? byStatus.failed ?? 0],
+    ].map(([label, value]) => `
+        <div class="tech-card p-4">
+            <div class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold mb-2">${label}</div>
+            <div class="text-2xl font-mono font-light tracking-tighter">${value}</div>
+        </div>
+    `).join('');
+}
+
+function renderTaskStatusCell(task) {
+    const statusClass = getTaskStatusClass(task.task_status);
+    const detail = task.pause_requested ? '等待当前子步骤结束后暂停' : (task.event_status ? `事件: ${labelStatus(task.event_status)}` : '任务队列');
+    return `
+        <div class="space-y-2">
+            <span class="px-2 py-1 ${statusClass} text-[10px] font-bold uppercase inline-flex">${labelTaskStatus(task.task_status)}</span>
+            <div class="text-[10px] text-gray-500 leading-5">${escapeHtml(detail)}</div>
+        </div>
+    `;
+}
+
+function renderTaskStageCell(task) {
+    const running = task.running_task_label
+        ? `<div class="text-[10px] text-blue-600 mt-1">当前子任务: ${escapeHtml(task.running_task_label)}</div>`
+        : '';
+    const failure = task.failure_reason
+        ? `<div class="text-[10px] text-red-600 mt-1" title="${escapeHtml(task.failure_reason)}">${escapeHtml(task.failure_reason)}</div>`
+        : '';
+    return `
+        <div class="max-w-xs">
+            <div class="font-semibold">${escapeHtml(labelTaskStage(task.progress_stage))}</div>
+            <div class="text-[10px] text-gray-500 mt-1 leading-5">${escapeHtml(task.progress_message || '等待执行')}</div>
+            ${running}
+            ${failure}
+        </div>
+    `;
+}
+
+function renderTaskProgressCell(task) {
+    const percent = Math.max(0, Math.min(100, Number(task.progress_percent || 0)));
+    const currentStep = Number(task.current_step || 0);
+    const totalSteps = Number(task.total_steps || 0);
+    return `
+        <div class="min-w-[180px]">
+            <div class="flex items-center justify-between text-[10px] text-gray-500 mb-1">
+                <span>${currentStep} / ${totalSteps || '—'} 步</span>
+                <span class="font-bold text-gray-700">${percent}%</span>
+            </div>
+            <div class="w-full h-2 bg-gray-100 border border-gray-200 overflow-hidden">
+                <div class="h-full bg-black transition-all" style="width:${percent}%"></div>
+            </div>
+            <div class="text-[10px] text-gray-400 mt-2">
+                推理子任务: ${task.completed_task_count || 0}/${task.task_count || 0}
+                ${task.failed_task_count ? ` · 失败 ${task.failed_task_count}` : ''}
+            </div>
+        </div>
+    `;
+}
+
+function renderTaskWorkerCell(task) {
+    return `
+        <div class="text-[10px] leading-5 text-gray-600">
+            <div>Worker: <span class="font-bold text-gray-800">${escapeHtml(task.locked_by || '待分配')}</span></div>
+            <div>心跳: <span class="font-bold text-gray-800">${formatDateTime(task.heartbeat)}</span></div>
+            <div>锁定至: <span class="font-bold text-gray-800">${formatDateTime(task.locked_until)}</span></div>
+        </div>
+    `;
+}
+
+function renderTaskRetryCell(task) {
+    const resumeCount = Number(task.manual_resume_count || 0);
+    return `
+        <div class="text-[10px] leading-5 text-gray-600">
+            <div>自动重试: <span class="font-bold text-gray-800">${task.retry_count || 0}/${task.max_retries || 3}</span></div>
+            <div>人工继续: <span class="font-bold text-gray-800">${resumeCount}</span> 次</div>
+        </div>
+    `;
+}
+
+async function showTaskProgressDetail(uuid) {
+    showLoading(true);
+    try {
+        const response = await authFetch(`${TASKS_API}/${uuid}`);
+        if (!response.ok) throw new Error(`HTTP_${response.status}`);
+
+        const task = await response.json();
+        const stepDetails = task.step_details || {};
+        const pipeline = Array.isArray(stepDetails.pipeline) ? stepDetails.pipeline : [];
+        const inferenceTasks = Array.isArray(stepDetails.inference_tasks) ? stepDetails.inference_tasks : [];
+
+        const content = `
+            <div class="space-y-5 font-mono text-xs">
+                <div class="flex flex-wrap gap-2">
+                    <span class="px-2 py-1 ${getTaskStatusClass(task.task_status)} text-[10px] font-bold uppercase">${escapeHtml(labelTaskStatus(task.task_status))}</span>
+                    <span class="px-2 py-1 border border-gray-200 text-[10px] font-bold uppercase">${escapeHtml(labelTaskStage(task.progress_stage))}</span>
+                    <span class="px-2 py-1 border border-gray-200 text-[10px] font-bold uppercase">进度 ${task.progress_percent || 0}%</span>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div><span class="text-gray-500 uppercase">事件标题</span><div class="font-bold mt-1">${escapeHtml(task.event_title || '暂无')}</div></div>
+                    <div><span class="text-gray-500 uppercase">事件状态</span><div class="font-bold mt-1">${escapeHtml(labelStatus(task.event_status))}</div></div>
+                    <div><span class="text-gray-500 uppercase">任务 UUID</span><div class="font-bold mt-1 break-all">${escapeHtml(task.uuid)}</div></div>
+                    <div><span class="text-gray-500 uppercase">Worker</span><div class="font-bold mt-1">${escapeHtml(task.locked_by || '待分配')}</div></div>
+                    <div><span class="text-gray-500 uppercase">当前阶段</span><div class="font-bold mt-1">${escapeHtml(labelTaskStage(task.progress_stage))}</div></div>
+                    <div><span class="text-gray-500 uppercase">步骤进度</span><div class="font-bold mt-1">${task.current_step || 0} / ${task.total_steps || 0}</div></div>
+                    <div><span class="text-gray-500 uppercase">自动重试</span><div class="font-bold mt-1">${task.retry_count || 0} / ${task.max_retries || 3}</div></div>
+                    <div><span class="text-gray-500 uppercase">人工继续</span><div class="font-bold mt-1">${task.manual_resume_count || 0} 次</div></div>
+                </div>
+
+                <div class="border border-gray-200 p-4 bg-gray-50">
+                    <div class="flex items-center justify-between text-[10px] text-gray-500 mb-2">
+                        <span>当前说明</span>
+                        <span class="font-bold text-gray-700">${task.progress_percent || 0}%</span>
+                    </div>
+                    <div class="w-full h-2 bg-white border border-gray-200 overflow-hidden mb-3">
+                        <div class="h-full bg-black transition-all" style="width:${Math.max(0, Math.min(100, Number(task.progress_percent || 0)))}%"></div>
+                    </div>
+                    <div class="leading-6 text-gray-700">${escapeHtml(task.progress_message || '等待执行')}</div>
+                </div>
+
+                <div class="border-t border-gray-100 pt-4">
+                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">流程阶段</div>
+                    <div class="space-y-2">
+                        ${pipeline.map(step => `
+                            <div class="flex items-start justify-between gap-3 border border-gray-200 px-3 py-2">
+                                <div class="font-semibold">${escapeHtml(step.label || step.key || '步骤')}</div>
+                                <span class="px-2 py-0.5 ${getTaskStepClass(step.status)} text-[10px] font-bold uppercase">${escapeHtml(labelTaskStep(step.status))}</span>
+                            </div>
+                        `).join('') || '<div class="text-gray-400">暂无流程信息</div>'}
+                    </div>
+                </div>
+
+                <div class="border-t border-gray-100 pt-4">
+                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">推理子任务</div>
+                    <div class="space-y-2">
+                        ${inferenceTasks.map(item => `
+                            <div class="border border-gray-200 px-3 py-2">
+                                <div class="flex items-start justify-between gap-3">
+                                    <div>
+                                        <div class="font-semibold">${escapeHtml(item.type || 'UNKNOWN')}</div>
+                                        <div class="text-[10px] text-gray-500 mt-1">${escapeHtml(item.label || item.prompt || '未命名任务')}</div>
+                                    </div>
+                                    <span class="px-2 py-0.5 ${getTaskStepClass(item.status)} text-[10px] font-bold uppercase">${escapeHtml(labelTaskStep(item.status))}</span>
+                                </div>
+                                ${item.error ? `<div class="text-[10px] text-red-600 mt-2 break-all">${escapeHtml(item.error)}</div>` : ''}
+                            </div>
+                        `).join('') || '<div class="text-gray-400">暂无子任务信息</div>'}
+                    </div>
+                </div>
+
+                ${task.failure_reason ? `
+                <div class="border-t border-gray-100 pt-4">
+                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">失败原因</div>
+                    <div class="border border-red-200 bg-red-50 p-3 leading-6 text-red-700">${escapeHtml(task.failure_reason)}</div>
+                </div>` : ''}
+
+                ${task.last_error_details ? `
+                <div class="border-t border-gray-100 pt-4">
+                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">错误详情</div>
+                    <pre class="whitespace-pre-wrap bg-gray-50 border border-gray-200 p-3 rounded-sm text-[10px]">${escapeHtml(task.last_error_details)}</pre>
+                </div>` : ''}
+
+                ${task.inference_result ? `
+                <div class="border-t border-gray-100 pt-4">
+                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">推理结果</div>
+                    <pre class="whitespace-pre-wrap bg-gray-50 border border-gray-200 p-3 rounded-sm text-[10px]">${escapeHtml(stringifyData(task.inference_result))}</pre>
+                </div>` : ''}
+
+                <div class="border-t border-gray-100 pt-4 flex flex-wrap gap-2">
+                    ${task.can_pause ? `<button onclick="window.pauseTaskProgress('${task.uuid}')" class="px-3 py-2 border border-amber-300 text-amber-700 hover:border-amber-500 hover:bg-amber-50 transition-colors font-mono text-[10px] font-bold uppercase">暂停任务</button>` : ''}
+                    ${task.can_resume ? `<button onclick="window.resumeTaskProgress('${task.uuid}')" class="px-3 py-2 border border-green-300 text-green-700 hover:border-green-500 hover:bg-green-50 transition-colors font-mono text-[10px] font-bold uppercase">${task.task_status === 'pause_requested' ? '取消暂停' : '继续任务'}</button>` : ''}
+                    <button onclick="window.jumpToEventDetail('${task.uuid}')" class="px-3 py-2 border border-gray-300 hover:border-black hover:bg-gray-100 transition-colors font-mono text-[10px] font-bold uppercase">查看事件</button>
+                </div>
+            </div>
+        `;
+
+        showModal(`任务进度 ${uuid.slice(0, 8)}`, content);
+    } catch (error) {
+        console.error('Task detail load failed:', error);
+        showToast('加载任务详情失败', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+async function pauseTaskProgress(uuid) {
+    showLoading(true);
+    try {
+        const response = await authFetch(`${TASKS_API}/${uuid}/pause`, { method: 'POST' });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({ detail: response.statusText }));
+            throw new Error(err.detail || response.statusText);
+        }
+        const result = await response.json();
+        showToast(result.message || '任务已暂停', 'success');
+        document.getElementById('detail-modal')?.remove();
+        await loadTaskProgress(_tasksPage);
+    } catch (error) {
+        showToast('暂停任务失败: ' + error.message, 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+async function resumeTaskProgress(uuid) {
+    showLoading(true);
+    try {
+        const response = await authFetch(`${TASKS_API}/${uuid}/resume`, { method: 'POST' });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({ detail: response.statusText }));
+            throw new Error(err.detail || response.statusText);
+        }
+        const result = await response.json();
+        showToast(result.message || '任务已继续', 'success');
+        document.getElementById('detail-modal')?.remove();
+        await loadTaskProgress(_tasksPage);
+    } catch (error) {
+        showToast('继续任务失败: ' + error.message, 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+function jumpToTaskProgress(uuid) {
+    const keywordInput = document.getElementById('task-filter-keyword');
+    if (keywordInput) keywordInput.value = uuid;
+    switchView('tasks');
+}
+
+async function jumpToEventDetail(uuid) {
+    document.getElementById('detail-modal')?.remove();
+    await showEventDetail(uuid);
 }
 
 // ==================== Products ====================
@@ -1149,7 +1519,7 @@ function renderPagination(containerId, current, total, loadFn) {
 // 分页辅助：通过函数名反查
 window._pgCall = function(name, page) {
     const map = {
-        loadEvents, loadRawPool, loadTrack,
+        loadEvents, loadRawPool, loadTrack, loadTaskProgress,
     };
     if (map[name]) map[name](page);
 };
@@ -1238,9 +1608,51 @@ function labelStatus(status) {
     return STATUS_LABELS[status] || (status || '暂无');
 }
 
+function labelTaskStatus(status) {
+    return TASK_STATUS_LABELS[status] || (status || '暂无');
+}
+
+function labelTaskStage(stage) {
+    return TASK_STAGE_LABELS[stage] || (stage || '等待执行');
+}
+
+function labelTaskStep(status) {
+    const map = {
+        pending: '待执行',
+        running: '进行中',
+        completed: '已完成',
+        failed: '失败',
+        skipped: '已跳过'
+    };
+    return map[String(status || '').toLowerCase()] || (status || '未知');
+}
+
 function labelSeverity(severity) {
     if (!severity) return '暂无';
     return SEVERITY_LABELS[String(severity).toLowerCase()] || severity;
+}
+
+function getTaskStatusClass(status) {
+    const map = {
+        pending: 'bg-gray-100 text-gray-700',
+        locked: 'bg-blue-100 text-blue-700',
+        pause_requested: 'bg-amber-100 text-amber-700',
+        paused: 'bg-yellow-100 text-yellow-700',
+        completed: 'bg-green-100 text-green-700',
+        failed: 'bg-red-100 text-red-700'
+    };
+    return map[String(status || '').toLowerCase()] || 'bg-gray-100 text-gray-700';
+}
+
+function getTaskStepClass(status) {
+    const map = {
+        pending: 'bg-gray-100 text-gray-600 border border-gray-200',
+        running: 'bg-blue-100 text-blue-700 border border-blue-200',
+        completed: 'bg-green-100 text-green-700 border border-green-200',
+        failed: 'bg-red-100 text-red-700 border border-red-200',
+        skipped: 'bg-gray-100 text-gray-500 border border-gray-200'
+    };
+    return map[String(status || '').toLowerCase()] || 'bg-gray-100 text-gray-600 border border-gray-200';
 }
 
 function formatDate(timestamp) {
@@ -1423,11 +1835,17 @@ function collectSettingsUpdates(container) {
 window.processEvent = processEvent;
 window.showPoolEventDetail = showPoolEventDetail;
 window.showEventDetail = showEventDetail;
+window.showTaskProgressDetail = showTaskProgressDetail;
+window.pauseTaskProgress = pauseTaskProgress;
+window.resumeTaskProgress = resumeTaskProgress;
+window.jumpToTaskProgress = jumpToTaskProgress;
+window.jumpToEventDetail = jumpToEventDetail;
 window.showProductDetail = showProductDetail;
 window.viewReport = viewReport;
 window.publishReport = publishReport;
 window.generateReport = generateReport;
 window.loadEvents = loadEvents;
+window.loadTaskProgress = loadTaskProgress;
 window.loadPool = loadPool;
 window.loadRawPool = loadRawPool;
 window.loadTrack = loadTrack;

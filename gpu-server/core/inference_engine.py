@@ -44,6 +44,8 @@ class InferenceEngine:
         pre_image_path: str,
         post_image_path: str,
         tasks: List[Dict],
+        progress_callback=None,
+        pause_callback=None,
     ) -> Dict[str, Any]:
         """
         执行全部推理任务。
@@ -68,16 +70,26 @@ class InferenceEngine:
 
         results: Dict[str, Any] = {}
 
-        for task in tasks:
+        total_tasks = len(tasks)
+
+        for index, task in enumerate(tasks, start=1):
             task_id = task.get("task_id", 0)
             task_type = task.get("type", "")
             prompt = task.get("prompt", "")
             key = f"task_{task_id}"
 
+            if pause_callback:
+                pause_callback()
+
+            if progress_callback:
+                progress_callback(task=task, index=index, total=total_tasks, phase="running")
+
             # 检查该任务是否启用
             if not self.tasks_cfg.get(task_type, {}).get("enabled", True):
                 logger.info(f"任务 {task_id} ({task_type}) 已禁用，跳过")
                 results[key] = {"type": task_type, "result": None, "skipped": True}
+                if progress_callback:
+                    progress_callback(task=task, index=index, total=total_tasks, phase="skipped")
                 continue
 
             logger.info(f"执行任务 {task_id}: {task_type}")
@@ -89,10 +101,20 @@ class InferenceEngine:
 
                 results[key] = {"type": task_type, "result": result}
                 logger.info(f"任务 {task_id} 完成: {str(result)[:80]}")
+                if progress_callback:
+                    progress_callback(task=task, index=index, total=total_tasks, phase="completed")
 
             except Exception as e:
                 logger.error(f"任务 {task_id} ({task_type}) 失败: {e}")
                 results[key] = {"type": task_type, "result": None, "error": str(e)}
+                if progress_callback:
+                    progress_callback(
+                        task=task,
+                        index=index,
+                        total=total_tasks,
+                        phase="failed",
+                        error=str(e),
+                    )
 
         elapsed = time.time() - start
         logger.info(f"推理完成，耗时 {elapsed:.1f}s")

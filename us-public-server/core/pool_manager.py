@@ -14,6 +14,7 @@ from models.models import Event, GeeTask, TaskQueue, EventPool
 from core.gee_manager import GeeManager
 from core.quality_assessor import QualityAssessor
 from utils.logger import get_logger
+from utils.task_progress import build_initial_progress_state
 
 logger = get_logger(__name__)
 
@@ -437,6 +438,8 @@ class PoolManager:
                     task_data=json.dumps(task_data, ensure_ascii=False),
                     priority=priority,
                     status="pending",
+                    max_retries=self.task_cfg.get("max_retries", 3),
+                    **build_initial_progress_state(task_data),
                     created_at=now,
                     updated_at=now,
                 )
@@ -583,12 +586,12 @@ class PoolManager:
     # ── 6. 释放超时锁 ─────────────────────────────────────
 
     def release_timeout_locks(self) -> int:
-        """释放超时的任务锁，将 locked 任务重置为 pending"""
+        """处理超时的执行锁：执行中任务自动重试，暂停请求任务转为已暂停"""
         now = _now_ms()
         locked_tasks = (
             self.db.query(TaskQueue)
             .filter(
-                TaskQueue.status == "locked",
+                TaskQueue.status.in_(["locked", "pause_requested"]),
                 TaskQueue.locked_until < now,
             )
             .all()
@@ -596,20 +599,71 @@ class PoolManager:
 
         released = 0
         for task in locked_tasks:
-            if task.retry_count >= (task.max_retries or 3):
-                task.status = "failed"
-                task.failure_reason = "超过最大重试次数"
-                # 将 event 状态回退到 checked
-                event = self.db.query(Event).filter(Event.uuid == task.uuid).first()
+            event = self.db.query(Event).filter(Event.uuid == task.uuid).first()
+
+            if task.status == "pause_requested":
+                task.status = "paused"
+                task.pause_requested = 0
+                task.paused_at = now
+                task.locked_by = None
+                task.locked_at = None
+                task.locked_until = None
+                task.heartbeat = None
+                task.progress_stage = "paused"
+                task.progress_message = "暂停请求未获 Worker 确认，已因锁超时强制暂停"
+                task.updated_at = now
                 if event:
-                    event.status = "checked"
-            else:
+                    event.status = "queued"
+                    event.updated_at = now
+                released += 1
+                continue
+
+            current_retry_count = task.retry_count or 0
+            max_retries = task.max_retries or 3
+            retry_state = build_initial_progress_state(task.task_data)
+
+            if current_retry_count < max_retries:
+                next_retry_count = current_retry_count + 1
                 task.status = "pending"
                 task.locked_by = None
                 task.locked_at = None
                 task.locked_until = None
                 task.heartbeat = None
-                task.retry_count = (task.retry_count or 0) + 1
+                task.pause_requested = 0
+                task.paused_at = None
+                task.retry_count = next_retry_count
+                task.failure_reason = "Worker 心跳超时，等待自动重试"
+                task.last_error_details = "任务锁超时释放，系统已重新排队"
+                task.progress_stage = retry_state["progress_stage"]
+                task.progress_message = f"Worker 超时，准备第 {next_retry_count} 次自动重试"
+                task.progress_percent = retry_state["progress_percent"]
+                task.current_step = retry_state["current_step"]
+                task.total_steps = retry_state["total_steps"]
+                task.step_details = retry_state["step_details"]
+
+                if event:
+                    event.status = "queued"
+                    event.updated_at = now
+            else:
+                task.status = "failed"
+                task.failure_reason = "超过最大重试次数"
+                task.last_error_details = "任务锁连续超时，已自动停止，等待人工继续"
+                task.retry_count = current_retry_count
+                task.progress_stage = "failed"
+                task.progress_message = "连续失败已达到上限，任务已自动停止"
+                task.progress_percent = min(task.progress_percent or 0, 99)
+                task.pause_requested = 0
+                task.paused_at = None
+
+                if event:
+                    event.status = "failed"
+                    event.updated_at = now
+
+            if task.status == "failed":
+                task.locked_by = None
+                task.locked_at = None
+                task.locked_until = None
+                task.heartbeat = None
 
             task.updated_at = now
             released += 1

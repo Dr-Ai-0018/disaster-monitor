@@ -5,7 +5,7 @@
 import time
 import requests
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 
 from config.settings import settings
 from utils.logger import get_logger
@@ -50,15 +50,68 @@ class DisasterAPIClient:
 
     # ── 心跳更新 ───────────────────────────────────────
 
-    def update_heartbeat(self, task_uuid: str) -> bool:
+    def update_heartbeat(self, task_uuid: str) -> Dict[str, Any]:
         url = f"{self.base_url}/api/tasks/{task_uuid}/heartbeat"
         try:
             resp = self.session.put(url, json={"worker_id": self.worker_id}, timeout=10)
             resp.raise_for_status()
             logger.debug(f"心跳更新: {task_uuid[:8]}")
-            return True
+            return resp.json()
         except requests.exceptions.RequestException as e:
             logger.warning(f"心跳更新失败 {task_uuid[:8]}: {e}")
+            return {"should_pause": False}
+
+    def update_progress(
+        self,
+        task_uuid: str,
+        stage: str,
+        message: str,
+        current_step: int,
+        total_steps: int,
+        step_details: Optional[Dict[str, Any]] = None,
+        progress_percent: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        url = f"{self.base_url}/api/tasks/{task_uuid}/progress"
+        payload = {
+            "worker_id": self.worker_id,
+            "stage": stage,
+            "message": message,
+            "current_step": current_step,
+            "total_steps": total_steps,
+            "progress_percent": progress_percent,
+            "step_details": step_details,
+        }
+        try:
+            resp = self.session.put(url, json=payload, timeout=15)
+            resp.raise_for_status()
+            return resp.json()
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"进度更新失败 {task_uuid[:8]}: {e}")
+            return {"should_pause": False}
+
+    def acknowledge_pause(
+        self,
+        task_uuid: str,
+        message: str,
+        current_step: int,
+        total_steps: int,
+        step_details: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        url = f"{self.base_url}/api/tasks/{task_uuid}/pause-ack"
+        payload = {
+            "worker_id": self.worker_id,
+            "message": message,
+            "current_step": current_step,
+            "total_steps": total_steps,
+            "step_details": step_details,
+        }
+        try:
+            resp = self.session.put(url, json=payload, timeout=15)
+            resp.raise_for_status()
+            logger.info(f"任务已暂停: {task_uuid[:8]}")
+            return True
+        except requests.exceptions.RequestException as e:
+            logger.error(f"暂停确认失败 {task_uuid[:8]}: {e}")
             return False
 
     # ── 提交结果 ───────────────────────────────────────
