@@ -205,6 +205,10 @@
                     <i data-lucide="settings" class="w-4 h-4"></i>
                     <span>系统配置</span>
                 </a>
+                <a href="#" class="nav-item flex items-center gap-3 px-4 py-3 font-mono text-xs font-bold tracking-widest uppercase text-gray-600 hover:bg-gray-100 hover:text-black transition-colors" data-view="workflow">
+                    <i data-lucide="git-branch" class="w-4 h-4"></i>
+                    <span>工作流</span>
+                </a>
             </nav>
             
             <div class="p-4 border-t border-gray-200">
@@ -408,7 +412,10 @@
 
                 <!-- Events 视图 -->
                 <div class="hidden space-y-6" id="view-events">
-                    <h2 class="font-mono text-2xl font-bold tracking-widest">事件管理</h2>
+                    <div class="flex items-center justify-between">
+                        <h2 class="font-mono text-2xl font-bold tracking-widest">事件管理</h2>
+                        <button onclick="window.exportEventsCsv()" class="px-3 py-2 border border-gray-300 hover:border-black font-mono text-[10px] font-bold uppercase transition-colors">导出 CSV</button>
+                    </div>
 
                     <!-- 筛选栏 -->
                     <div class="flex flex-wrap gap-3 items-end">
@@ -704,7 +711,10 @@
                             <div class="settings-field"><label class="sfield-label">灾后窗口 (天)</label><input class="sfield-input" data-key="gee_time_after" type="number" min="1" max="365"></div>
                             <div class="settings-field"><label class="sfield-label">分辨率 (m/px)</label><input class="sfield-input" data-key="gee_scale" type="number" min="1"></div>
                             <div class="settings-field"><label class="sfield-label">最大并发任务</label><input class="sfield-input" data-key="gee_max_concurrent" type="number" min="1" max="20"></div>
-                            <div class="md:col-span-2 flex justify-end pt-2">
+                            <div class="md:col-span-2 flex justify-between items-center pt-2">
+                                <button onclick="window.reinitializeGee()" class="px-4 py-2 border border-gray-300 hover:border-black font-mono text-[10px] font-bold uppercase transition-colors">
+                                    <i data-lucide="refresh-cw" class="w-3 h-3 inline-block mr-1"></i>重新初始化 GEE
+                                </button>
                                 <button onclick="window.saveSettingsGroup('sec-gee')" class="settings-save-btn">保存 GEE 配置</button>
                             </div>
                         </div>
@@ -810,6 +820,13 @@
                             </div>
                         </div>
                     </div>
+                </div>
+
+                <!-- Workflow 视图 -->
+                <div class="hidden space-y-6" id="view-workflow">
+                    <h2 class="font-mono text-2xl font-bold tracking-widest">工作流</h2>
+                    <div class="flex items-center gap-0" id="workflow-steps-indicator"></div>
+                    <div id="workflow-step-content"></div>
                 </div>
 
             </div>

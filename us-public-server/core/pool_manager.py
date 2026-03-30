@@ -5,7 +5,7 @@
 import uuid
 import json
 from datetime import datetime, timezone
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from config.settings import settings

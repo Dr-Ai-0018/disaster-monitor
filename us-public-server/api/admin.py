@@ -1,12 +1,15 @@
 """
 管理后台 API 路由
 """
+import csv
+import io
 import json
 import secrets
 from hashlib import sha256
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -643,3 +646,98 @@ def trigger_job(
 
     background_tasks.add_task(_run)
     return MessageResponse(message=f"任务 '{job_id}' 已触发")
+
+
+@router.post("/gee/reinitialize", response_model=MessageResponse)
+def reinitialize_gee(
+    background_tasks: BackgroundTasks,
+    _: AdminUser = Depends(get_current_admin),
+):
+    """手动重新初始化 GEE（后台执行，立即返回）"""
+    def _run():
+        import core.gee_manager as gm
+        gm._gee_initialized = False
+        from core.gee_manager import initialize_gee
+        initialize_gee()
+
+    background_tasks.add_task(_run)
+    return MessageResponse(message="GEE 重新初始化已在后台启动，请稍后刷新系统状态")
+
+
+@router.get("/export/events")
+def export_events_csv(
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    from models.models import GeeTask
+    from api.events import _build_imagery_count_map
+
+    events = db.query(Event).order_by(Event.event_date.desc()).all()
+    count_map = _build_imagery_count_map(db, [e.uuid for e in events])
+
+    headers = [
+        "uuid", "event_id", "sub_id", "title", "category_name", "country", "severity",
+        "event_date", "status", "pre_image_downloaded", "post_image_downloaded",
+        "pre_imagery_count", "post_imagery_count", "quality_pass", "created_at",
+    ]
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(headers)
+    for e in events:
+        counts = count_map.get(e.uuid, {})
+        pre_c = counts.get("pre", 1 if e.pre_image_downloaded else 0)
+        post_c = counts.get("post", 1 if e.post_image_downloaded else 0)
+        w.writerow([
+            e.uuid, e.event_id, e.sub_id, e.title, e.category_name, e.country, e.severity,
+            datetime.fromtimestamp(e.event_date / 1000, tz=timezone.utc).strftime("%Y-%m-%d") if e.event_date else "",
+            e.status,
+            int(bool(e.pre_image_downloaded)), int(bool(e.post_image_downloaded)),
+            pre_c, post_c, int(bool(e.quality_pass)),
+            datetime.fromtimestamp(e.created_at / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if e.created_at else "",
+        ])
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": "attachment; filename=events.csv"},
+    )
+
+
+@router.get("/export/gee-tasks")
+def export_gee_tasks_csv(
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    from models.models import GeeTask
+
+    rows = (
+        db.query(GeeTask, Event.title)
+        .outerjoin(Event, Event.uuid == GeeTask.uuid)
+        .order_by(GeeTask.created_at.desc())
+        .all()
+    )
+
+    headers = [
+        "id", "event_uuid", "event_title", "task_type", "status",
+        "start_date", "end_date", "image_date", "image_source",
+        "failure_reason", "retry_count", "created_at", "completed_at",
+    ]
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(headers)
+    for t, title in rows:
+        def ts(ms):
+            return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if ms else ""
+        w.writerow([
+            t.id, t.uuid, title or "", t.task_type, t.status,
+            t.start_date, t.end_date,
+            datetime.fromtimestamp(t.image_date / 1000, tz=timezone.utc).strftime("%Y-%m-%d") if t.image_date else "",
+            t.image_source, t.failure_reason, t.retry_count,
+            ts(t.created_at), ts(t.completed_at),
+        ])
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": "attachment; filename=gee_tasks.csv"},
+    )

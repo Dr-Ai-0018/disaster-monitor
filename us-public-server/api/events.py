@@ -253,6 +253,45 @@ def get_stats(
     )
 
 
+@router.get("/{uuid}/gee-tasks")
+def get_event_gee_tasks(
+    uuid: str,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    event = db.query(Event).filter(Event.uuid == uuid).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="事件不存在")
+    tasks = (
+        db.query(GeeTask)
+        .filter(GeeTask.uuid == uuid)
+        .order_by(GeeTask.created_at.desc())
+        .all()
+    )
+    return {
+        "uuid": uuid,
+        "total": len(tasks),
+        "data": [
+            {
+                "id": t.id,
+                "task_type": t.task_type,
+                "status": t.status,
+                "start_date": t.start_date,
+                "end_date": t.end_date,
+                "image_date": t.image_date,
+                "image_source": t.image_source,
+                "failure_reason": t.failure_reason,
+                "retry_count": t.retry_count,
+                "max_retries": t.max_retries,
+                "created_at": t.created_at,
+                "started_at": t.started_at,
+                "completed_at": t.completed_at,
+            }
+            for t in tasks
+        ],
+    }
+
+
 @router.get("/{uuid}", response_model=EventDetail)
 def get_event(
     uuid: str,

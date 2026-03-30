@@ -53,13 +53,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ 默认管理员初始化失败: {e}")
 
-    # 3. 初始化 GEE（非阻塞，失败不中断启动）
+    # 3. 初始化 GEE（带 30 秒超时，失败不中断启动）
     try:
+        import concurrent.futures
         from core.gee_manager import initialize_gee
-        if initialize_gee():
-            logger.info("✅ Google Earth Engine 初始化完成")
-        else:
-            logger.warning("⚠️  GEE 初始化失败，影像下载功能不可用")
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            try:
+                result = await asyncio.wait_for(
+                    loop.run_in_executor(pool, initialize_gee),
+                    timeout=30.0,
+                )
+                if result:
+                    logger.info("✅ Google Earth Engine 初始化完成")
+                else:
+                    logger.warning("⚠️  GEE 初始化失败，影像下载功能不可用")
+            except asyncio.TimeoutError:
+                logger.warning("⚠️  GEE 初始化超时（30s），已跳过。可在管理后台手动重新初始化")
     except Exception as e:
         logger.warning(f"⚠️  GEE 初始化异常: {e}")
 

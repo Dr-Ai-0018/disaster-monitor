@@ -75,7 +75,8 @@ const VIEW_LABELS = {
     tasks: '任务进度',
     products: '成品池',
     reports: '灾害日报',
-    settings: '系统配置'
+    settings: '系统配置',
+    workflow: '工作流',
 };
 
 // ==================== 初始化 ====================
@@ -214,6 +215,7 @@ function switchView(view) {
         case 'products': loadProducts(); break;
         case 'reports': loadReports(); break;
         case 'settings': loadSettings(); break;
+        case 'workflow': initWorkflow(); break;
     }
 }
 
@@ -620,9 +622,13 @@ async function loadEvents(page = 1) {
 async function showEventDetail(uuid) {
     showLoading(true);
     try {
-        const resp = await authFetch(`${EVENTS_API}/${uuid}`);
-        if (!resp.ok) throw new Error(`HTTP_${resp.status}`);
-        const ev = await resp.json();
+        const [evResp, geeResp] = await Promise.all([
+            authFetch(`${EVENTS_API}/${uuid}`),
+            authFetch(`${EVENTS_API}/${uuid}/gee-tasks`),
+        ]);
+        if (!evResp.ok) throw new Error(`HTTP_${evResp.status}`);
+        const ev = await evResp.json();
+        const geeData = geeResp.ok ? await geeResp.json() : { data: [] };
 
         const preStatus = ev.pre_image_downloaded
             ? `<span class="text-green-600 font-bold">✓ 已下载</span> (${ev.pre_image_source || '暂无'}, ${ev.pre_window_days} 天窗口)`
@@ -635,6 +641,73 @@ async function showEventDetail(uuid) {
             : ev.post_imagery_open === false
                 ? `<span class="text-red-600 font-bold">✗ 已停止</span> (已达到最大窗口)`
                 : `<span class="text-yellow-600 font-bold">⏳ 追踪中</span> (${ev.post_window_days} 天窗口，已检查 ${ev.imagery_check_count ?? 0} 次${ev.post_imagery_last_check ? '，最近: ' + formatDate(ev.post_imagery_last_check) : ''})`;
+
+        const preCount = ev.pre_imagery_count ?? (ev.pre_image_downloaded ? 1 : 0);
+        const postCount = ev.post_imagery_count ?? (ev.post_image_downloaded ? 1 : 0);
+
+        const imageSection = `
+        <div class="border-t border-gray-100 pt-4">
+            <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">
+                卫星影像预览
+                <span class="text-gray-400 font-normal ml-2">灾前 ${preCount} 张 / 灾后 ${postCount} 张</span>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <div class="font-mono text-[10px] text-gray-500 uppercase mb-2">灾前影像</div>
+                    ${ev.has_pre_image
+                        ? `<img src="/api/public/image/${encodeURIComponent(ev.uuid)}/pre"
+                                class="w-full border border-gray-200 bg-gray-50"
+                                style="max-height:220px;object-fit:contain;" loading="lazy"
+                                onerror="this.outerHTML='<div class=\\'text-red-500 text-[10px] p-2 border border-red-200\\'>加载失败</div>'">`
+                        : `<div class="border border-gray-200 bg-gray-50 flex items-center justify-center h-28 text-gray-400 text-[10px]">无影像</div>`}
+                </div>
+                <div>
+                    <div class="font-mono text-[10px] text-gray-500 uppercase mb-2">灾后影像</div>
+                    ${ev.has_post_image
+                        ? `<img src="/api/public/image/${encodeURIComponent(ev.uuid)}/post"
+                                class="w-full border border-gray-200 bg-gray-50"
+                                style="max-height:220px;object-fit:contain;" loading="lazy"
+                                onerror="this.outerHTML='<div class=\\'text-red-500 text-[10px] p-2 border border-red-200\\'>加载失败</div>'">`
+                        : `<div class="border border-gray-200 bg-gray-50 flex items-center justify-center h-28 text-gray-400 text-[10px]">无影像</div>`}
+                </div>
+            </div>
+        </div>`;
+
+        const geeTasks = geeData.data || [];
+        const geeSection = `
+        <div class="border-t border-gray-100 pt-4">
+            <div class="flex items-center justify-between mb-3">
+                <div class="font-bold uppercase tracking-widest text-gray-600">GEE 任务历史 (${geeTasks.length} 条)</div>
+                <button onclick="window.exportGeeTasksCsv()" class="px-2 py-1 border border-gray-200 hover:border-black font-mono text-[10px] font-bold uppercase transition-colors">导出全部</button>
+            </div>
+            ${geeTasks.length === 0
+                ? `<div class="text-gray-400 text-[10px]">暂无记录</div>`
+                : `<div class="overflow-x-auto">
+                    <table class="w-full text-[10px]">
+                        <thead><tr class="border-b border-gray-200 bg-gray-50">
+                            <th class="py-2 px-2 text-left font-bold uppercase text-gray-500">类型</th>
+                            <th class="py-2 px-2 text-left font-bold uppercase text-gray-500">状态</th>
+                            <th class="py-2 px-2 text-left font-bold uppercase text-gray-500">日期范围</th>
+                            <th class="py-2 px-2 text-left font-bold uppercase text-gray-500">影像日期</th>
+                            <th class="py-2 px-2 text-left font-bold uppercase text-gray-500">来源</th>
+                            <th class="py-2 px-2 text-left font-bold uppercase text-gray-500">重试</th>
+                            <th class="py-2 px-2 text-left font-bold uppercase text-gray-500">失败原因</th>
+                        </tr></thead>
+                        <tbody>
+                            ${geeTasks.map(t => `
+                            <tr class="border-b border-gray-100 hover:bg-gray-50">
+                                <td class="py-2 px-2">${t.task_type === 'pre_disaster' ? '灾前' : '灾后'}</td>
+                                <td class="py-2 px-2"><span class="${geeStatusClass(t.status)} px-1.5 py-0.5 font-bold">${t.status}</span></td>
+                                <td class="py-2 px-2 whitespace-nowrap">${escapeHtml(t.start_date || '—')} ~ ${escapeHtml(t.end_date || '—')}</td>
+                                <td class="py-2 px-2 whitespace-nowrap">${formatDate(t.image_date)}</td>
+                                <td class="py-2 px-2">${escapeHtml(t.image_source || '—')}</td>
+                                <td class="py-2 px-2">${t.retry_count}/${t.max_retries}</td>
+                                <td class="py-2 px-2 text-red-600 max-w-[140px] truncate" title="${escapeHtml(t.failure_reason || '')}">${escapeHtml(t.failure_reason || '—')}</td>
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>
+                </div>`}
+        </div>`;
 
         const content = `
             <div class="space-y-4 font-mono text-xs">
@@ -655,17 +728,8 @@ async function showEventDetail(uuid) {
                         <div class="flex gap-3 items-start"><span class="text-gray-500 w-14 shrink-0">灾后:</span><span>${postStatus}</span></div>
                     </div>
                 </div>
-                <div class="border-t border-gray-100 pt-4">
-                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">影像数量与入口</div>
-                    <div class="grid grid-cols-2 gap-3 mb-3">
-                        <div><span class="text-gray-500 uppercase">灾前成功抓取</span><div class="font-bold mt-1">${ev.pre_imagery_count ?? (ev.pre_image_downloaded ? 1 : 0)} 张</div></div>
-                        <div><span class="text-gray-500 uppercase">灾后成功抓取</span><div class="font-bold mt-1">${ev.post_imagery_count ?? (ev.post_image_downloaded ? 1 : 0)} 张</div></div>
-                    </div>
-                    <div class="flex flex-wrap gap-2">
-                        ${ev.has_pre_image ? `<a href="/api/public/image/${encodeURIComponent(ev.uuid)}/pre" target="_blank" rel="noopener noreferrer" class="px-2 py-1 border border-gray-300 hover:border-black hover:bg-gray-100 transition-colors font-mono text-[10px] font-bold uppercase">查看灾前影像</a>` : `<span class="px-2 py-1 border border-gray-200 text-gray-400 font-mono text-[10px] font-bold uppercase">灾前无入口</span>`}
-                        ${ev.has_post_image ? `<a href="/api/public/image/${encodeURIComponent(ev.uuid)}/post" target="_blank" rel="noopener noreferrer" class="px-2 py-1 border border-gray-300 hover:border-black hover:bg-gray-100 transition-colors font-mono text-[10px] font-bold uppercase">查看灾后影像</a>` : `<span class="px-2 py-1 border border-gray-200 text-gray-400 font-mono text-[10px] font-bold uppercase">灾后无入口</span>`}
-                    </div>
-                </div>
+                ${imageSection}
+                ${geeSection}
                 <div class="border-t border-gray-100 pt-4">
                     <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">推理任务</div>
                     <button onclick="window.jumpToTaskProgress('${ev.uuid}')" class="px-2 py-1 border border-gray-300 hover:border-black hover:bg-gray-100 transition-colors font-mono text-[10px] font-bold uppercase">查看任务进度</button>
@@ -713,6 +777,16 @@ function renderEventStatsRow(stats) {
             <div class="text-2xl font-mono font-light tracking-tighter">${value}</div>
         </div>
     `).join('');
+}
+
+function geeStatusClass(status) {
+    const map = {
+        COMPLETED: 'bg-green-100 text-green-700',
+        FAILED: 'bg-red-100 text-red-700',
+        PENDING: 'bg-gray-100 text-gray-600',
+        RUNNING: 'bg-blue-100 text-blue-700',
+    };
+    return map[status] || 'bg-gray-100 text-gray-600';
 }
 
 function formatImageryStatus(event) {
@@ -1512,8 +1586,10 @@ function renderPagination(containerId, current, total, loadFn) {
 window._pgCall = function(name, page) {
     const map = {
         loadEvents, loadRawPool, loadTrack, loadTaskProgress, loadProducts, loadReports,
+        _wfLoadEvents,
     };
-    if (map[name]) map[name](page);
+    const fn = map[name] || window[name];
+    if (typeof fn === 'function') fn(page);
 };
 
 // ==================== 工具函数 ====================
@@ -1821,6 +1897,382 @@ function collectSettingsUpdates(container) {
     return updates;
 }
 
+// ==================== Workflow ====================
+
+let _workflowStep = 1;
+let _workflowEvent = null;
+let _workflowImageType = null;
+let _workflowTaskUuid = null;
+let _workflowPollTimer = null;
+
+const WORKFLOW_STEP_LABELS = ['选择事件', '选择影像', '触发推理', '查看结果'];
+
+function initWorkflow() {
+    _workflowStep = 1;
+    _workflowEvent = null;
+    _workflowImageType = null;
+    _workflowTaskUuid = null;
+    _clearWorkflowPoll();
+    goToStep(1);
+}
+
+function _clearWorkflowPoll() {
+    if (_workflowPollTimer) { clearInterval(_workflowPollTimer); _workflowPollTimer = null; }
+}
+
+function goToStep(step) {
+    _clearWorkflowPoll();
+    _workflowStep = step;
+    _renderStepIndicator();
+    switch (step) {
+        case 1: renderStep1(); break;
+        case 2: renderStep2(); break;
+        case 3: renderStep3(); break;
+        case 4: renderStep4(); break;
+    }
+}
+
+function _renderStepIndicator() {
+    const el = document.getElementById('workflow-steps-indicator');
+    if (!el) return;
+    el.innerHTML = WORKFLOW_STEP_LABELS.map((label, i) => {
+        const n = i + 1;
+        const active = n === _workflowStep;
+        const done = n < _workflowStep;
+        const numClass = active
+            ? 'w-7 h-7 bg-black text-white font-mono text-xs font-bold flex items-center justify-center shrink-0'
+            : done
+                ? 'w-7 h-7 bg-gray-400 text-white font-mono text-xs font-bold flex items-center justify-center shrink-0'
+                : 'w-7 h-7 border border-gray-300 text-gray-400 font-mono text-xs font-bold flex items-center justify-center shrink-0';
+        const textClass = active ? 'font-mono text-xs font-bold' : 'font-mono text-xs text-gray-400';
+        const connector = n < 4 ? '<div class="flex-1 h-px bg-gray-200 mx-2 min-w-[12px]"></div>' : '';
+        return `<div class="flex items-center ${n < 4 ? 'flex-1 min-w-0' : ''}">
+            <div class="flex items-center gap-2 shrink-0">
+                <div class="${numClass}">${done ? '✓' : n}</div>
+                <span class="${textClass} hidden sm:inline">${label}</span>
+            </div>
+            ${connector}
+        </div>`;
+    }).join('');
+}
+
+// ── Step 1: 选择事件 ──────────────────────────────────
+
+async function renderStep1() {
+    const el = document.getElementById('workflow-step-content');
+    if (!el) return;
+    el.innerHTML = `
+        <div class="tech-card p-6 space-y-4">
+            <div class="flex flex-wrap gap-3 items-end">
+                <div>
+                    <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">状态</div>
+                    <select id="wf-filter-status" class="px-3 py-2 border border-gray-200 font-mono text-xs bg-white focus:outline-none focus:border-black">
+                        <option value="">全部</option>
+                        <option value="checked">已质检</option>
+                        <option value="pool">事件池</option>
+                        <option value="pending">待处理</option>
+                    </select>
+                </div>
+                <div>
+                    <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">严重程度</div>
+                    <select id="wf-filter-severity" class="px-3 py-2 border border-gray-200 font-mono text-xs bg-white focus:outline-none focus:border-black">
+                        <option value="">全部</option>
+                        <option value="extreme">极高</option>
+                        <option value="high">高</option>
+                        <option value="medium">中</option>
+                        <option value="low">低</option>
+                    </select>
+                </div>
+                <div>
+                    <div class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500 mb-1">国家</div>
+                    <input id="wf-filter-country" type="text" placeholder="国家名称" class="px-3 py-2 border border-gray-200 font-mono text-xs focus:outline-none focus:border-black w-32">
+                </div>
+                <button onclick="window._wfLoadEvents(1)" class="px-4 py-2 border border-gray-200 hover:border-black font-mono text-xs font-bold tracking-widest uppercase transition-colors">搜索</button>
+            </div>
+            <div class="overflow-x-auto admin-table-wrap">
+                <table class="w-full">
+                    <thead>
+                        <tr class="border-b border-gray-100 bg-gray-50">
+                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">标题</th>
+                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">国家</th>
+                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">严重程度</th>
+                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">状态</th>
+                            <th class="py-3 px-4 text-left font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">影像</th>
+                            <th class="py-3 px-4 text-right font-mono text-[10px] font-bold tracking-widest uppercase text-gray-500">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="wf-events-tbody" class="font-mono text-xs"></tbody>
+                </table>
+            </div>
+            <div id="wf-events-pagination"></div>
+        </div>`;
+    lucide.createIcons();
+    await _wfLoadEvents(1);
+}
+
+async function _wfLoadEvents(page = 1) {
+    const status = document.getElementById('wf-filter-status')?.value || '';
+    const severity = document.getElementById('wf-filter-severity')?.value || '';
+    const country = document.getElementById('wf-filter-country')?.value || '';
+    let url = `${EVENTS_API}?page=${page}&limit=20`;
+    if (status) url += `&status=${encodeURIComponent(status)}`;
+    if (severity) url += `&severity=${encodeURIComponent(severity)}`;
+    if (country) url += `&country=${encodeURIComponent(country)}`;
+    try {
+        const resp = await authFetch(url);
+        if (!resp.ok) throw new Error(`HTTP_${resp.status}`);
+        const data = await resp.json();
+        const events = data.data || [];
+        document.getElementById('wf-events-tbody').innerHTML = events.map(ev => `
+            <tr class="border-b border-gray-100 hover:bg-gray-50">
+                <td class="py-3 px-4 font-semibold max-w-xs truncate" title="${escapeHtml(ev.title)}">${escapeHtml(ev.title)}</td>
+                <td class="py-3 px-4 text-gray-600 uppercase">${escapeHtml(ev.country || '暂无')}</td>
+                <td class="py-3 px-4"><span class="px-2 py-0.5 ${getSeverityClass(ev.severity)} text-[10px] font-bold uppercase">${labelSeverity(ev.severity)}</span></td>
+                <td class="py-3 px-4"><span class="px-2 py-0.5 bg-gray-100 text-gray-700 text-[10px] font-bold uppercase">${labelStatus(ev.status)}</span></td>
+                <td class="py-3 px-4 text-[10px]">${ev.pre_image_downloaded ? '<span class="text-green-600 font-bold">前✓</span>' : '<span class="text-gray-400">前—</span>'} ${ev.post_image_downloaded ? '<span class="text-green-600 font-bold">后✓</span>' : '<span class="text-gray-400">后—</span>'}</td>
+                <td class="py-3 px-4 text-right">
+                    <button onclick="window._wfSelectEvent('${ev.uuid}')" class="px-3 py-1 bg-black text-white font-mono text-[10px] font-bold uppercase hover:bg-gray-800">选择</button>
+                </td>
+            </tr>`).join('') || '<tr><td colspan="6" class="py-12 text-center text-gray-400 font-mono text-xs uppercase">暂无事件</td></tr>';
+        renderPagination('wf-events-pagination', data.page, data.pages, _wfLoadEvents);
+        // cache events for selection
+        window._wfEventsCache = {};
+        events.forEach(ev => { window._wfEventsCache[ev.uuid] = ev; });
+    } catch (e) {
+        showToast('加载事件失败: ' + e.message, 'error');
+    }
+}
+
+async function _wfSelectEvent(uuid) {
+    // try cache first, else fetch
+    let ev = window._wfEventsCache?.[uuid];
+    if (!ev) {
+        try {
+            const resp = await authFetch(`${EVENTS_API}/${uuid}`);
+            if (resp.ok) ev = await resp.json();
+        } catch (_) {}
+    }
+    if (!ev) { showToast('无法加载事件信息', 'error'); return; }
+    _workflowEvent = ev;
+    goToStep(2);
+}
+
+// ── Step 2: 选择影像 ──────────────────────────────────
+
+function renderStep2() {
+    const ev = _workflowEvent;
+    const el = document.getElementById('workflow-step-content');
+    if (!el) return;
+
+    const imgCard = (type, label, downloaded) => {
+        if (!downloaded) return `
+            <div class="tech-card p-6 flex flex-col items-center justify-center gap-3 opacity-40 cursor-not-allowed">
+                <i data-lucide="image-off" class="w-8 h-8 text-gray-400"></i>
+                <div class="font-mono text-xs text-gray-500 uppercase">${label} — 未下载</div>
+            </div>`;
+        const imgUrl = `/api/public/image/${encodeURIComponent(ev.uuid)}/${type}`;
+        const enhUrl = `/api/public/image/${encodeURIComponent(ev.uuid)}/${type}/enhanced`;
+        return `
+            <div class="tech-card p-4 space-y-3">
+                <div class="font-mono text-xs font-bold uppercase tracking-widest">${label}</div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <div class="font-mono text-[10px] text-gray-500 mb-1">原始</div>
+                        <img src="${imgUrl}" class="w-full border border-gray-200 bg-gray-50 object-contain" style="max-height:200px"
+                             onerror="this.parentElement.innerHTML='<div class=\\'text-red-500 text-[10px] p-2\\'>加载失败</div>'">
+                    </div>
+                    <div>
+                        <div class="font-mono text-[10px] text-gray-500 mb-1">增强</div>
+                        <img src="${enhUrl}" class="w-full border border-gray-200 bg-gray-50 object-contain" style="max-height:200px"
+                             onerror="this.parentElement.innerHTML='<div class=\\'text-red-500 text-[10px] p-2\\'>加载失败</div>'">
+                    </div>
+                </div>
+                <button onclick="window._wfConfirmImage('${type}')" class="w-full py-2 bg-black text-white font-mono text-[10px] font-bold uppercase hover:bg-gray-800 transition-colors">
+                    使用此影像 →
+                </button>
+            </div>`;
+    };
+
+    el.innerHTML = `
+        <div class="space-y-4">
+            <div class="tech-card p-4 font-mono text-xs flex flex-wrap items-center gap-3">
+                <span class="text-gray-500">已选事件:</span>
+                <span class="font-bold">${escapeHtml(ev.title)}</span>
+                <button onclick="window.goToStep(1)" class="ml-auto px-3 py-1 border border-gray-300 hover:border-black text-[10px] uppercase transition-colors">重新选择</button>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                ${imgCard('pre', '灾前影像', ev.pre_image_downloaded)}
+                ${imgCard('post', '灾后影像', ev.post_image_downloaded)}
+            </div>
+        </div>`;
+    lucide.createIcons();
+}
+
+function _wfConfirmImage(type) {
+    _workflowImageType = type;
+    goToStep(3);
+}
+
+// ── Step 3: 触发推理 ──────────────────────────────────
+
+function renderStep3() {
+    const ev = _workflowEvent;
+    const el = document.getElementById('workflow-step-content');
+    if (!el) return;
+    el.innerHTML = `
+        <div class="tech-card p-6 space-y-6">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 font-mono text-xs">
+                <div><div class="text-gray-500 uppercase mb-1">事件</div><div class="font-bold truncate" title="${escapeHtml(ev.title)}">${escapeHtml(ev.title)}</div></div>
+                <div><div class="text-gray-500 uppercase mb-1">国家</div><div class="font-bold uppercase">${escapeHtml(ev.country || '暂无')}</div></div>
+                <div><div class="text-gray-500 uppercase mb-1">严重程度</div><div class="font-bold">${labelSeverity(ev.severity)}</div></div>
+                <div><div class="text-gray-500 uppercase mb-1">选用影像</div><div class="font-bold">${_workflowImageType === 'pre' ? '灾前' : '灾后'}</div></div>
+            </div>
+            <div id="wf-inference-status" class="font-mono text-xs text-gray-500">点击下方按钮开始推理</div>
+            <div class="flex gap-3">
+                <button onclick="window.goToStep(2)" class="px-4 py-2 border border-gray-300 hover:border-black font-mono text-xs font-bold uppercase transition-colors">返回</button>
+                <button id="wf-trigger-btn" onclick="window._wfTriggerInference()" class="px-6 py-2 bg-black text-white font-mono text-xs font-bold uppercase hover:bg-gray-800 shadow-[3px_3px_0_#d4d4d4] transition-all">
+                    触发推理
+                </button>
+            </div>
+            <div id="wf-progress-area" class="hidden space-y-2">
+                <div class="h-2 border border-gray-200 bg-white overflow-hidden">
+                    <div id="wf-progress-bar" class="h-full bg-black transition-all duration-500" style="width:0%"></div>
+                </div>
+                <div id="wf-progress-msg" class="font-mono text-[10px] text-gray-500"></div>
+            </div>
+        </div>`;
+}
+
+async function _wfTriggerInference() {
+    const ev = _workflowEvent;
+    const btn = document.getElementById('wf-trigger-btn');
+    if (btn) { btn.disabled = true; btn.textContent = '提交中...'; }
+    try {
+        const resp = await authFetch(`${EVENTS_API}/${ev.uuid}/process`, { method: 'POST' });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+            throw new Error(err.detail || resp.statusText);
+        }
+        _workflowTaskUuid = ev.uuid;
+        const statusEl = document.getElementById('wf-inference-status');
+        if (statusEl) statusEl.textContent = '推理任务已提交，正在轮询进度...';
+        document.getElementById('wf-progress-area')?.classList.remove('hidden');
+        _startWorkflowPoll();
+    } catch (e) {
+        showToast('触发推理失败: ' + e.message, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = '触发推理'; }
+    }
+}
+
+function _startWorkflowPoll() {
+    _clearWorkflowPoll();
+    _wfPollOnce();
+    _workflowPollTimer = setInterval(_wfPollOnce, 3000);
+}
+
+async function _wfPollOnce() {
+    if (!_workflowTaskUuid) return;
+    try {
+        const resp = await authFetch(`${TASKS_API}/${_workflowTaskUuid}`);
+        if (!resp.ok) return;
+        const task = await resp.json();
+        const pct = task.progress_percent || 0;
+        const bar = document.getElementById('wf-progress-bar');
+        const msg = document.getElementById('wf-progress-msg');
+        const statusEl = document.getElementById('wf-inference-status');
+        if (bar) bar.style.width = `${pct}%`;
+        if (msg) msg.textContent = task.progress_message || '';
+        if (statusEl) statusEl.textContent = `状态: ${TASK_STATUS_LABELS[task.task_status] || task.task_status} — ${TASK_STAGE_LABELS[task.progress_stage] || task.progress_stage || ''}`;
+        if (task.task_status === 'completed') {
+            _clearWorkflowPoll();
+            showToast('推理完成', 'success');
+            goToStep(4);
+        } else if (task.task_status === 'failed') {
+            _clearWorkflowPoll();
+            showToast('推理失败: ' + (task.failure_reason || '未知原因'), 'error');
+        }
+    } catch (_) {}
+}
+
+// ── Step 4: 查看结果 ──────────────────────────────────
+
+async function renderStep4() {
+    const el = document.getElementById('workflow-step-content');
+    if (!el) return;
+    el.innerHTML = `<div class="tech-card p-6 font-mono text-xs text-gray-500">加载结果中...</div>`;
+    try {
+        const resp = await authFetch(`${TASKS_API}/${_workflowTaskUuid}`);
+        if (!resp.ok) throw new Error(`HTTP_${resp.status}`);
+        const task = await resp.json();
+
+        // try to load product
+        let product = null;
+        try {
+            const pr = await authFetch(`${PRODUCTS_API}/${_workflowTaskUuid}`);
+            if (pr.ok) product = await pr.json();
+        } catch (_) {}
+
+        el.innerHTML = `
+            <div class="tech-card p-6 space-y-6">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div class="font-mono text-sm font-bold tracking-widest">推理结果</div>
+                    <div class="flex gap-3">
+                        <button onclick="window.goToStep(1)" class="px-4 py-2 border border-gray-300 hover:border-black font-mono text-xs font-bold uppercase transition-colors">新工作流</button>
+                        <button onclick="window.generateReport()" class="px-4 py-2 bg-black text-white font-mono text-xs font-bold uppercase hover:bg-gray-800">生成日报</button>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 font-mono text-xs">
+                    <div><div class="text-gray-500 uppercase mb-1">事件</div><div class="font-bold truncate">${escapeHtml(_workflowEvent?.title || '—')}</div></div>
+                    <div><div class="text-gray-500 uppercase mb-1">任务状态</div><div class="font-bold text-green-600">${TASK_STATUS_LABELS[task.task_status] || task.task_status}</div></div>
+                    <div><div class="text-gray-500 uppercase mb-1">完成时间</div><div class="font-bold">${formatDateTime(task.completed_at)}</div></div>
+                    <div><div class="text-gray-500 uppercase mb-1">进度</div><div class="font-bold">${task.progress_percent || 0}%</div></div>
+                </div>
+                ${product?.summary ? `
+                <div class="border-t border-gray-100 pt-4">
+                    <div class="font-mono text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-3">AI 摘要</div>
+                    <div class="font-mono text-xs leading-6 whitespace-pre-wrap">${escapeHtml(product.summary)}</div>
+                </div>` : ''}
+                ${product?.inference_result ? `
+                <div class="border-t border-gray-100 pt-4">
+                    <div class="font-mono text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-3">推理详情</div>
+                    <pre class="bg-gray-50 border border-gray-200 p-4 font-mono text-[10px] overflow-x-auto whitespace-pre-wrap">${escapeHtml(stringifyData(product.inference_result))}</pre>
+                </div>` : task.step_details ? `
+                <div class="border-t border-gray-100 pt-4">
+                    <div class="font-mono text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-3">任务详情</div>
+                    <pre class="bg-gray-50 border border-gray-200 p-4 font-mono text-[10px] overflow-x-auto whitespace-pre-wrap">${escapeHtml(stringifyData(task.step_details))}</pre>
+                </div>` : ''}
+            </div>`;
+    } catch (e) {
+        el.innerHTML = `<div class="tech-card p-6 font-mono text-xs text-red-500">加载结果失败: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+// ── GEE 重新初始化 ────────────────────────────────────
+
+async function reinitializeGee() {
+    const resp = await authFetch(`${ADMIN_API}/gee/reinitialize`, { method: 'POST' });
+    if (resp.ok) showToast('GEE 重新初始化已在后台启动', 'success');
+    else showToast('操作失败', 'error');
+}
+
+async function exportEventsCsv() {
+    const resp = await authFetch(`${ADMIN_API}/export/events`);
+    if (!resp.ok) { showToast('导出失败', 'error'); return; }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'events.csv'; a.click();
+    URL.revokeObjectURL(url);
+}
+
+async function exportGeeTasksCsv() {
+    const resp = await authFetch(`${ADMIN_API}/export/gee-tasks`);
+    if (!resp.ok) { showToast('导出失败', 'error'); return; }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'gee_tasks.csv'; a.click();
+    URL.revokeObjectURL(url);
+}
+
 // ==================== 全局导出 ====================
 window.processEvent = processEvent;
 window.showPoolEventDetail = showPoolEventDetail;
@@ -1836,6 +2288,15 @@ window.publishReport = publishReport;
 window.generateReport = generateReport;
 window.loadEvents = loadEvents;
 window.loadTaskProgress = loadTaskProgress;
+window.exportEventsCsv = exportEventsCsv;
+window.exportGeeTasksCsv = exportGeeTasksCsv;
+window.reinitializeGee = reinitializeGee;
+window.initWorkflow = initWorkflow;
+window.goToStep = goToStep;
+window._wfLoadEvents = _wfLoadEvents;
+window._wfSelectEvent = _wfSelectEvent;
+window._wfConfirmImage = _wfConfirmImage;
+window._wfTriggerInference = _wfTriggerInference;
 window.loadPool = loadPool;
 window.loadRawPool = loadRawPool;
 window.loadTrack = loadTrack;
