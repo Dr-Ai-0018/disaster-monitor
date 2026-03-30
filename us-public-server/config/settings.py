@@ -58,6 +58,19 @@ class Settings:
         self.GEMINI_FLASH_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-2.0-flash")
         self.GEMINI_PRO_MODEL = os.getenv("GEMINI_PRO_MODEL", "gemini-2.5-pro-preview-03-25")
 
+        # Latest Model Open API
+        self.LATEST_MODEL_ENDPOINT = os.getenv(
+            "LATEST_MODEL_ENDPOINT", "https://frp-geo.killerbest.com"
+        )
+        self.LATEST_MODEL_API_KEY = os.getenv("LATEST_MODEL_API_KEY", "")
+        self.LATEST_MODEL_TIMEOUT_SECONDS = int(
+            os.getenv("LATEST_MODEL_TIMEOUT_SECONDS", "60")
+        )
+        self.LATEST_MODEL_POLL_INTERVAL_SECONDS = float(
+            os.getenv("LATEST_MODEL_POLL_INTERVAL_SECONDS", "2")
+        )
+        self.LATEST_MODEL_MAX_POLLS = int(os.getenv("LATEST_MODEL_MAX_POLLS", "180"))
+
         # JWT
         self.JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-jwt-secret")
         self.JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
@@ -65,16 +78,12 @@ class Settings:
             os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "1440")
         )
 
-        # 初始化默认管理员 / GPU Worker Token
+        # 初始化默认管理员
         self.SEED_ADMIN_ENABLED = os.getenv("SEED_ADMIN_ENABLED", "true").lower() == "true"
         self.SEED_ADMIN_USERNAME = os.getenv("SEED_ADMIN_USERNAME", "user-707")
         self.SEED_ADMIN_PASSWORD = os.getenv("SEED_ADMIN_PASSWORD", "srgYJKmvr953yj")
         self.SEED_ADMIN_EMAIL = os.getenv("SEED_ADMIN_EMAIL", "0example@killerbest.com")
         self.SEED_ADMIN_FULL_NAME = os.getenv("SEED_ADMIN_FULL_NAME", "System Administrator")
-        self.SEED_GPU_TOKEN_ENABLED = os.getenv("SEED_GPU_TOKEN_ENABLED", "true").lower() == "true"
-        self.SEED_GPU_TOKEN_NAME = os.getenv("SEED_GPU_TOKEN_NAME", "GPU-Server-1")
-        self.SEED_GPU_TOKEN_DESCRIPTION = os.getenv("SEED_GPU_TOKEN_DESCRIPTION", "内网GPU服务器访问令牌")
-        self.SEED_GPU_TOKEN_VALUE = os.getenv("SEED_GPU_TOKEN_VALUE", "gpu-server-local-token")
 
         # 服务器
         self.SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
@@ -82,7 +91,6 @@ class Settings:
         self.SERVER_WORKERS = int(os.getenv("SERVER_WORKERS", "4"))
         self.REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))
         self.REQUEST_DELAY = float(os.getenv("REQUEST_DELAY", "1.5"))
-        # GPU Worker 访问卫星影像的服务器基础 URL（生产环境必须设置，如 https://api.example.com）
         self.SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "")
 
         cors_str = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:8000")

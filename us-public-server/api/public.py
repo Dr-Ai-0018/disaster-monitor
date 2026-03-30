@@ -228,3 +228,61 @@ def get_satellite_image(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"影像转换失败: {e}")
+
+
+@router.get("/image/{uuid}/{image_type}/enhanced")
+def get_satellite_image_enhanced(
+    uuid: str,
+    image_type: str,
+    db: Session = Depends(get_db),
+):
+    """
+    返回 2%-98% 百分位拉伸增强后的 PNG（公开，无需认证）
+    image_type: "pre" | "post"
+    """
+    if image_type not in ("pre", "post"):
+        raise HTTPException(status_code=400, detail="image_type 必须是 pre 或 post")
+
+    event = db.query(Event).filter(Event.uuid == uuid).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="事件不存在")
+
+    image_path_str = event.pre_image_path if image_type == "pre" else event.post_image_path
+    if not image_path_str:
+        raise HTTPException(status_code=404, detail="影像不存在")
+
+    from pathlib import Path
+    path = Path(image_path_str)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="影像文件不存在")
+
+    try:
+        import numpy as np
+        from PIL import Image
+
+        with Image.open(path) as img:
+            arr = np.array(img.convert("RGB")).astype(np.float32)
+
+        result = np.zeros_like(arr)
+        for i in range(3):
+            ch = arr[:, :, i]
+            nonzero = ch[ch > 0]
+            if nonzero.size == 0:
+                result[:, :, i] = ch
+                continue
+            p2, p98 = np.percentile(nonzero, (2, 98))
+            result[:, :, i] = np.clip((ch - p2) / (p98 - p2 + 1e-6) * 255, 0, 255)
+
+        enhanced = Image.fromarray(result.astype(np.uint8))
+        enhanced.thumbnail((900, 900))
+        buf = io.BytesIO()
+        enhanced.save(buf, format="PNG", optimize=True)
+        return Response(
+            content=buf.getvalue(),
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+    except ImportError:
+        raise HTTPException(status_code=501, detail="numpy 未安装，无法执行增强处理")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"影像增强失败: {e}")

@@ -71,3 +71,9 @@ reference/
 
 # ── Test directories (scripts kept locally, not versioned) ───────────────────
 test/
+
+
+# 临时文件
+temp/
+
+skills/

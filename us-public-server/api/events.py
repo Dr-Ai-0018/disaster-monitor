@@ -3,12 +3,13 @@
 """
 import json
 import math
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
-from models.models import AdminUser, Event, get_db
+from models.models import AdminUser, Event, GeeTask, get_db
 from schemas.schemas import (
     EventListResponse, EventSummary, EventDetail, EventStatsResponse, MessageResponse
 )
@@ -17,7 +18,42 @@ from utils.auth import get_current_admin
 router = APIRouter(prefix="/api/events", tags=["事件管理"])
 
 
-def _event_to_summary(e: Event) -> EventSummary:
+def _build_imagery_count_map(db: Session, uuids: List[str]) -> dict[str, dict[str, int]]:
+    if not uuids:
+        return {}
+
+    rows = (
+        db.query(GeeTask.uuid, GeeTask.task_type, func.count(GeeTask.id))
+        .filter(
+            GeeTask.uuid.in_(uuids),
+            GeeTask.status == "COMPLETED",
+            GeeTask.task_type.in_(["pre_disaster", "post_disaster"]),
+        )
+        .group_by(GeeTask.uuid, GeeTask.task_type)
+        .all()
+    )
+
+    result: dict[str, dict[str, int]] = {}
+    for uuid, task_type, count in rows:
+        if uuid not in result:
+            result[uuid] = {"pre": 0, "post": 0}
+        if task_type == "pre_disaster":
+            result[uuid]["pre"] = int(count or 0)
+        elif task_type == "post_disaster":
+            result[uuid]["post"] = int(count or 0)
+    return result
+
+
+def _event_to_summary(e: Event, imagery_counts: Optional[dict[str, int]] = None) -> EventSummary:
+    imagery_counts = imagery_counts or {}
+    pre_count = int(imagery_counts.get("pre", 0) or 0)
+    post_count = int(imagery_counts.get("post", 0) or 0)
+    # 兼容旧数据: 事件表已标记下载成功，但 gee_tasks 没有历史记录
+    if bool(e.pre_image_downloaded) and pre_count == 0:
+        pre_count = 1
+    if bool(e.post_image_downloaded) and post_count == 0:
+        post_count = 1
+
     return EventSummary(
         uuid=e.uuid,
         event_id=e.event_id,
@@ -38,10 +74,26 @@ def _event_to_summary(e: Event) -> EventSummary:
         quality_pass=bool(e.quality_pass),
         created_at=e.created_at,
         updated_at=e.updated_at,
+        pre_window_days=getattr(e, "pre_window_days", 7),
+        post_window_days=getattr(e, "post_window_days", 7),
+        post_imagery_open=bool(getattr(e, "post_imagery_open", 1)),
+        imagery_check_count=getattr(e, "imagery_check_count", 0) or 0,
+        pre_imagery_count=pre_count,
+        post_imagery_count=post_count,
+        has_pre_image=bool(e.pre_image_path),
+        has_post_image=bool(e.post_image_path),
     )
 
 
-def _event_to_detail(e: Event) -> EventDetail:
+def _event_to_detail(e: Event, imagery_counts: Optional[dict[str, int]] = None) -> EventDetail:
+    imagery_counts = imagery_counts or {}
+    pre_count = int(imagery_counts.get("pre", 0) or 0)
+    post_count = int(imagery_counts.get("post", 0) or 0)
+    if bool(e.pre_image_downloaded) and pre_count == 0:
+        pre_count = 1
+    if bool(e.post_image_downloaded) and post_count == 0:
+        post_count = 1
+
     qa = None
     if e.quality_assessment:
         try:
@@ -88,6 +140,17 @@ def _event_to_detail(e: Event) -> EventDetail:
         quality_pass=bool(e.quality_pass),
         created_at=e.created_at,
         updated_at=e.updated_at,
+        pre_window_days=getattr(e, "pre_window_days", 7),
+        post_window_days=getattr(e, "post_window_days", 7),
+        post_imagery_open=bool(getattr(e, "post_imagery_open", 1)),
+        imagery_check_count=getattr(e, "imagery_check_count", 0) or 0,
+        pre_imagery_exhausted=bool(getattr(e, "pre_imagery_exhausted", 0)),
+        pre_imagery_last_check=getattr(e, "pre_imagery_last_check", None),
+        post_imagery_last_check=getattr(e, "post_imagery_last_check", None),
+        pre_imagery_count=pre_count,
+        post_imagery_count=post_count,
+        has_pre_image=bool(e.pre_image_path),
+        has_post_image=bool(e.post_image_path),
     )
 
 
@@ -101,6 +164,7 @@ def list_events(
     severity: Optional[str] = None,
     start_date: Optional[int] = None,
     end_date: Optional[int] = None,
+    imagery_open: Optional[bool] = None,
     db: Session = Depends(get_db),
     _: AdminUser = Depends(get_current_admin),
 ):
@@ -117,16 +181,20 @@ def list_events(
         q = q.filter(Event.event_date >= start_date)
     if end_date:
         q = q.filter(Event.event_date <= end_date)
+    if imagery_open is not None:
+        q = q.filter(Event.post_imagery_open == (1 if imagery_open else 0))
 
     total = q.count()
     events = q.order_by(Event.event_date.desc()).offset((page - 1) * limit).limit(limit).all()
+
+    imagery_count_map = _build_imagery_count_map(db, [e.uuid for e in events])
 
     return EventListResponse(
         total=total,
         page=page,
         limit=limit,
         pages=math.ceil(total / limit) if total else 0,
-        data=[_event_to_summary(e) for e in events],
+        data=[_event_to_summary(e, imagery_count_map.get(e.uuid)) for e in events],
     )
 
 
@@ -135,8 +203,6 @@ def get_stats(
     db: Session = Depends(get_db),
     _: AdminUser = Depends(get_current_admin),
 ):
-    from sqlalchemy import func
-
     all_events = db.query(Event).all()
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     day_ms = 86400 * 1000
@@ -145,6 +211,11 @@ def get_stats(
     by_category: dict = {}
     by_severity: dict = {}
     recent_24h = 0
+
+    both_ready = 0
+    post_pending = 0
+    pre_only = 0
+    exhausted = 0
 
     for e in all_events:
         by_status[e.status] = by_status.get(e.status, 0) + 1
@@ -155,13 +226,70 @@ def get_stats(
         if e.created_at and (now_ms - e.created_at) <= day_ms:
             recent_24h += 1
 
+        pre_ok = bool(e.pre_image_downloaded)
+        post_ok = bool(e.post_image_downloaded)
+        if pre_ok and post_ok:
+            both_ready += 1
+        elif pre_ok and not post_ok and getattr(e, "post_imagery_open", 1):
+            post_pending += 1
+        elif pre_ok and not post_ok:
+            pre_only += 1
+        elif not pre_ok and getattr(e, "pre_imagery_exhausted", 0) and \
+                not getattr(e, "post_imagery_open", 1):
+            exhausted += 1
+
     return EventStatsResponse(
         total_events=len(all_events),
         by_status=by_status,
         by_category=by_category,
         by_severity=by_severity,
         recent_24h=recent_24h,
+        by_imagery_status={
+            "both_ready": both_ready,
+            "post_pending": post_pending,
+            "pre_only": pre_only,
+            "exhausted": exhausted,
+        },
     )
+
+
+@router.get("/{uuid}/gee-tasks")
+def get_event_gee_tasks(
+    uuid: str,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    event = db.query(Event).filter(Event.uuid == uuid).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="事件不存在")
+    tasks = (
+        db.query(GeeTask)
+        .filter(GeeTask.uuid == uuid)
+        .order_by(GeeTask.created_at.desc())
+        .all()
+    )
+    return {
+        "uuid": uuid,
+        "total": len(tasks),
+        "data": [
+            {
+                "id": t.id,
+                "task_type": t.task_type,
+                "status": t.status,
+                "start_date": t.start_date,
+                "end_date": t.end_date,
+                "image_date": t.image_date,
+                "image_source": t.image_source,
+                "failure_reason": t.failure_reason,
+                "retry_count": t.retry_count,
+                "max_retries": t.max_retries,
+                "created_at": t.created_at,
+                "started_at": t.started_at,
+                "completed_at": t.completed_at,
+            }
+            for t in tasks
+        ],
+    }
 
 
 @router.get("/{uuid}", response_model=EventDetail)
@@ -173,7 +301,8 @@ def get_event(
     event = db.query(Event).filter(Event.uuid == uuid).first()
     if not event:
         raise HTTPException(status_code=404, detail="事件不存在")
-    return _event_to_detail(event)
+    imagery_count_map = _build_imagery_count_map(db, [event.uuid])
+    return _event_to_detail(event, imagery_count_map.get(event.uuid))
 
 
 @router.post("/{uuid}/process", response_model=MessageResponse)
@@ -187,19 +316,31 @@ def trigger_process(
     if not event:
         raise HTTPException(status_code=404, detail="事件不存在")
 
+    processable_statuses = {"pending", "pool", "checked", "queued"}
+    if event.status not in processable_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"当前状态 {event.status} 不支持手动推进",
+        )
+
     def _run():
         from core.pool_manager import PoolManager
         from models.models import get_session_factory
         s = get_session_factory()()
         try:
             pm = PoolManager(s)
-            if event.status == "pending":
+            fresh_event = s.query(Event).filter(Event.uuid == uuid).first()
+            current_status = fresh_event.status if fresh_event else event.status
+            if current_status == "pending":
                 pm.process_pending_events(limit=1)
-            elif event.status == "pool":
+            elif current_status == "pool":
                 pm.submit_gee_tasks_for_pool(limit=1)
                 pm.assess_ready_events(limit=1)
-            elif event.status == "checked":
+            elif current_status == "checked":
                 pm.enqueue_checked_events(limit=1)
+                pm.process_pending_inference_tasks(limit=1)
+            elif current_status == "queued":
+                pm.process_pending_inference_tasks(limit=1)
         finally:
             s.close()
 

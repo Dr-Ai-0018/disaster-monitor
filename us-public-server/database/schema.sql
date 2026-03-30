@@ -36,6 +36,14 @@ CREATE TABLE IF NOT EXISTS events (
     quality_checked INTEGER DEFAULT 0,
     quality_pass INTEGER DEFAULT 0,
     quality_check_time INTEGER,
+    -- 动态影像追踪字段
+    pre_window_days INTEGER DEFAULT 7,
+    pre_imagery_last_check INTEGER,
+    pre_imagery_exhausted INTEGER DEFAULT 0,
+    post_window_days INTEGER DEFAULT 7,
+    post_imagery_last_check INTEGER,
+    post_imagery_open INTEGER DEFAULT 1,
+    imagery_check_count INTEGER DEFAULT 0,
     UNIQUE(event_id, sub_id)
 );
 
@@ -46,6 +54,8 @@ CREATE INDEX IF NOT EXISTS idx_events_quality_pass ON events(quality_pass);
 CREATE INDEX IF NOT EXISTS idx_events_country ON events(country);
 CREATE INDEX IF NOT EXISTS idx_events_severity ON events(severity);
 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
+CREATE INDEX IF NOT EXISTS idx_events_post_imagery_open ON events(post_imagery_open);
+CREATE INDEX IF NOT EXISTS idx_events_post_imagery_check ON events(post_imagery_last_check);
 
 -- 2. GEE 影像下载任务表
 CREATE TABLE IF NOT EXISTS gee_tasks (
@@ -91,6 +101,16 @@ CREATE TABLE IF NOT EXISTS task_queue (
     retry_count INTEGER DEFAULT 0,
     max_retries INTEGER DEFAULT 3,
     failure_reason TEXT,
+    last_error_details TEXT,
+    progress_stage TEXT DEFAULT 'queued',
+    progress_message TEXT,
+    progress_percent INTEGER DEFAULT 0,
+    current_step INTEGER DEFAULT 0,
+    total_steps INTEGER DEFAULT 0,
+    step_details TEXT,
+    pause_requested INTEGER DEFAULT 0,
+    paused_at INTEGER,
+    manual_resume_count INTEGER DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     completed_at INTEGER,
@@ -102,6 +122,7 @@ CREATE INDEX IF NOT EXISTS idx_task_queue_priority ON task_queue(priority DESC);
 CREATE INDEX IF NOT EXISTS idx_task_queue_locked_until ON task_queue(locked_until);
 CREATE INDEX IF NOT EXISTS idx_task_queue_locked_by ON task_queue(locked_by);
 CREATE INDEX IF NOT EXISTS idx_task_queue_created_at ON task_queue(created_at);
+CREATE INDEX IF NOT EXISTS idx_task_queue_pause_requested ON task_queue(pause_requested);
 
 -- 4. 成品池表
 CREATE TABLE IF NOT EXISTS products (

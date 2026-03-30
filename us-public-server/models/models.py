@@ -45,6 +45,14 @@ class Event(Base):
     quality_checked = Column(Integer, default=0)
     quality_pass = Column(Integer, default=0)
     quality_check_time = Column(Integer)
+    # 动态影像追踪
+    pre_window_days = Column(Integer, default=7)
+    pre_imagery_last_check = Column(Integer)
+    pre_imagery_exhausted = Column(Integer, default=0)
+    post_window_days = Column(Integer, default=7)
+    post_imagery_last_check = Column(Integer)
+    post_imagery_open = Column(Integer, default=1)
+    imagery_check_count = Column(Integer, default=0)
 
 
 class GeeTask(Base):
@@ -88,6 +96,16 @@ class TaskQueue(Base):
     retry_count = Column(Integer, default=0)
     max_retries = Column(Integer, default=3)
     failure_reason = Column(Text)
+    last_error_details = Column(Text)
+    progress_stage = Column(Text, default="queued")
+    progress_message = Column(Text)
+    progress_percent = Column(Integer, default=0)
+    current_step = Column(Integer, default=0)
+    total_steps = Column(Integer, default=0)
+    step_details = Column(Text)
+    pause_requested = Column(Integer, default=0)
+    paused_at = Column(Integer)
+    manual_resume_count = Column(Integer, default=0)
     created_at = Column(Integer, nullable=False)
     updated_at = Column(Integer, nullable=False)
     completed_at = Column(Integer)

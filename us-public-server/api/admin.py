@@ -1,19 +1,32 @@
 """
 管理后台 API 路由
 """
+import csv
+import io
 import json
 import secrets
+from hashlib import sha256
 from datetime import datetime, timezone
 from typing import Any, Dict, List
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from fastapi.responses import StreamingResponse
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from models.models import AdminUser, ApiToken, Event, TaskQueue, Product, DailyReport, get_db
 from schemas.schemas import (
     SystemStatusResponse, CreateTokenRequest, CreateTokenResponse,
     TokenListItem, MessageResponse,
+    TaskProgressSummary, TaskProgressDetail,
+    TaskProgressListResponse, TaskProgressStatsResponse,
 )
 from utils.auth import get_current_admin
+from utils.task_progress import (
+    build_initial_progress_state,
+    safe_json_loads,
+    summarize_step_details,
+    get_total_steps,
+)
 
 router = APIRouter(prefix="/api/admin", tags=["管理后台"])
 
@@ -37,6 +50,63 @@ def _now_ms() -> int:
     return int(datetime.now(timezone.utc).timestamp() * 1000)
 
 
+def _task_can_pause(status: str) -> bool:
+    return False
+
+
+def _task_can_resume(status: str) -> bool:
+    return False
+
+
+def _task_to_progress_payload(
+    task: TaskQueue,
+    event: Any = None,
+    product: Any = None,
+) -> Dict[str, Any]:
+    task_data = safe_json_loads(task.task_data, {})
+    step_details_json = task.step_details
+    if not step_details_json:
+        step_details_json = build_initial_progress_state(task.task_data)["step_details"]
+    step_summary = summarize_step_details(step_details_json)
+
+    return {
+        "uuid": task.uuid,
+        "event_title": getattr(event, "title", None),
+        "event_country": getattr(event, "country", None),
+        "event_category": getattr(event, "category_name", None) or getattr(event, "category", None),
+        "event_severity": getattr(event, "severity", None),
+        "event_status": getattr(event, "status", None),
+        "task_status": task.status,
+        "progress_stage": task.progress_stage,
+        "progress_message": task.progress_message,
+        "progress_percent": task.progress_percent or 0,
+        "current_step": task.current_step or 0,
+        "total_steps": task.total_steps or get_total_steps(task.task_data),
+        "task_count": step_summary["task_count"],
+        "completed_task_count": step_summary["completed_count"],
+        "failed_task_count": step_summary["failed_count"],
+        "running_task_label": step_summary["running_label"],
+        "retry_count": task.retry_count or 0,
+        "max_retries": task.max_retries or 3,
+        "manual_resume_count": task.manual_resume_count or 0,
+        "pause_requested": bool(task.pause_requested),
+        "locked_by": task.locked_by,
+        "locked_at": task.locked_at,
+        "locked_until": task.locked_until,
+        "heartbeat": task.heartbeat,
+        "failure_reason": task.failure_reason,
+        "created_at": task.created_at,
+        "updated_at": task.updated_at,
+        "completed_at": task.completed_at,
+        "can_pause": _task_can_pause(task.status),
+        "can_resume": _task_can_resume(task.status),
+        "task_data": task_data,
+        "step_details": step_summary["details"],
+        "inference_result": safe_json_loads(getattr(product, "inference_result", None), None),
+        "last_error_details": task.last_error_details,
+    }
+
+
 @router.get("/status", response_model=SystemStatusResponse)
 def system_status(
     db: Session = Depends(get_db),
@@ -48,7 +118,7 @@ def system_status(
     # 数据库统计
     total_events = db.query(Event).count()
     tasks_pending = db.query(TaskQueue).filter(TaskQueue.status == "pending").count()
-    tasks_locked = db.query(TaskQueue).filter(TaskQueue.status == "locked").count()
+    tasks_running = db.query(TaskQueue).filter(TaskQueue.status == "running").count()
     products_count = db.query(Product).count()
 
     db_size_mb = 0
@@ -96,7 +166,7 @@ def system_status(
             "size_mb": db_size_mb,
             "events_count": total_events,
             "tasks_pending": tasks_pending,
-            "tasks_locked": tasks_locked,
+            "tasks_running": tasks_running,
             "products_count": products_count,
         },
         gee={
@@ -111,6 +181,210 @@ def system_status(
     )
 
 
+@router.get("/tasks/stats", response_model=TaskProgressStatsResponse)
+def task_progress_stats(
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    tasks = db.query(TaskQueue).all()
+    by_status: Dict[str, int] = {}
+    for task in tasks:
+        by_status[task.status] = by_status.get(task.status, 0) + 1
+
+    return TaskProgressStatsResponse(
+        total=len(tasks),
+        by_status=by_status,
+        active=sum(by_status.get(key, 0) for key in ["pending", "running"]),
+        pause_requested=0,
+        paused=0,
+        completed=by_status.get("completed", 0),
+        failed=by_status.get("failed", 0),
+    )
+
+
+@router.get("/tasks", response_model=TaskProgressListResponse)
+def list_task_progress(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    status: str = Query("", description="任务状态筛选"),
+    keyword: str = Query("", description="按 UUID / 标题 / 国家搜索"),
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    query = db.query(TaskQueue).outerjoin(Event, Event.uuid == TaskQueue.uuid)
+
+    if status:
+        query = query.filter(TaskQueue.status == status)
+
+    if keyword.strip():
+        like_kw = f"%{keyword.strip()}%"
+        query = query.filter(
+            or_(
+                TaskQueue.uuid.like(like_kw),
+                Event.title.like(like_kw),
+                Event.country.like(like_kw),
+            )
+        )
+
+    total = query.count()
+    pages = max(1, (total + limit - 1) // limit)
+    rows = (
+        query.order_by(TaskQueue.updated_at.desc(), TaskQueue.created_at.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
+    )
+
+    uuids = [row.uuid for row in rows]
+    events = db.query(Event).filter(Event.uuid.in_(uuids)).all() if uuids else []
+    products = db.query(Product).filter(Product.uuid.in_(uuids)).all() if uuids else []
+    event_map = {item.uuid: item for item in events}
+    product_map = {item.uuid: item for item in products}
+
+    return TaskProgressListResponse(
+        total=total,
+        page=page,
+        limit=limit,
+        pages=pages,
+        data=[
+            TaskProgressSummary(**_task_to_progress_payload(
+                row,
+                event_map.get(row.uuid),
+                product_map.get(row.uuid),
+            ))
+            for row in rows
+        ],
+    )
+
+
+@router.get("/tasks/{uuid}", response_model=TaskProgressDetail)
+def get_task_progress(
+    uuid: str,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    task = db.query(TaskQueue).filter(TaskQueue.uuid == uuid).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    event = db.query(Event).filter(Event.uuid == uuid).first()
+    product = db.query(Product).filter(Product.uuid == uuid).first()
+    return TaskProgressDetail(**_task_to_progress_payload(task, event, product))
+
+
+@router.post("/tasks/{uuid}/pause", response_model=MessageResponse)
+def pause_task_progress(
+    uuid: str,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    task = db.query(TaskQueue).filter(TaskQueue.uuid == uuid).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    event = db.query(Event).filter(Event.uuid == uuid).first()
+    now = _now_ms()
+
+    if task.status == "pending":
+        task.status = "paused"
+        task.pause_requested = 0
+        task.paused_at = now
+        task.locked_by = None
+        task.locked_at = None
+        task.locked_until = None
+        task.heartbeat = None
+        task.progress_stage = "paused"
+        task.progress_message = "任务已手动暂停，等待继续"
+        task.updated_at = now
+        if event:
+            event.status = "queued"
+            event.updated_at = now
+        db.commit()
+        return MessageResponse(message="任务已暂停")
+
+    if task.status == "locked":
+        task.status = "pause_requested"
+        task.pause_requested = 1
+        task.progress_stage = "pause_requested"
+        task.progress_message = "已发送暂停请求，将在当前子步骤完成后停止"
+        task.updated_at = now
+        db.commit()
+        return MessageResponse(message="暂停请求已发送")
+
+    if task.status == "pause_requested":
+        return MessageResponse(message="暂停请求已在处理中")
+
+    if task.status == "paused":
+        return MessageResponse(message="任务已处于暂停状态")
+
+    raise HTTPException(status_code=400, detail=f"当前状态 {task.status} 不支持暂停")
+
+
+@router.post("/tasks/{uuid}/resume", response_model=MessageResponse)
+def resume_task_progress(
+    uuid: str,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    task = db.query(TaskQueue).filter(TaskQueue.uuid == uuid).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    if task.status not in {"pause_requested", "paused", "failed"}:
+        raise HTTPException(status_code=400, detail=f"当前状态 {task.status} 不支持继续")
+
+    previous_status = task.status
+    event = db.query(Event).filter(Event.uuid == uuid).first()
+    now = _now_ms()
+
+    if previous_status == "pause_requested":
+        lock_is_alive = bool(task.locked_by and task.locked_until and task.locked_until > now)
+
+        if lock_is_alive:
+            task.status = "locked"
+            task.pause_requested = 0
+            task.paused_at = None
+            task.progress_stage = "claimed" if task.progress_stage == "pause_requested" else task.progress_stage
+            task.progress_message = "已取消暂停请求，任务继续执行"
+            task.updated_at = now
+            db.commit()
+            return MessageResponse(message="已取消暂停请求，任务继续执行")
+
+        previous_status = "paused"
+
+    initial_state = build_initial_progress_state(task.task_data)
+
+    task.status = "pending"
+    task.pause_requested = 0
+    task.paused_at = None
+    task.locked_by = None
+    task.locked_at = None
+    task.locked_until = None
+    task.heartbeat = None
+    task.completed_at = None
+    task.failure_reason = None
+    task.last_error_details = None
+    task.progress_stage = initial_state["progress_stage"]
+    task.progress_message = "已手动继续，等待 Worker 重新执行"
+    task.progress_percent = initial_state["progress_percent"]
+    task.current_step = initial_state["current_step"]
+    task.total_steps = initial_state["total_steps"]
+    task.step_details = initial_state["step_details"]
+    task.manual_resume_count = (task.manual_resume_count or 0) + 1
+    if previous_status == "failed":
+        task.retry_count = 0
+    else:
+        task.retry_count = task.retry_count or 0
+    task.updated_at = now
+
+    if event:
+        event.status = "queued"
+        event.updated_at = now
+
+    db.commit()
+    return MessageResponse(message="任务已重新排队，等待 Worker 继续")
+
+
 # ── API Token 管理 ────────────────────────────────────
 
 @router.get("/tokens", response_model=List[TokenListItem])
@@ -121,6 +395,7 @@ def list_tokens(
     tokens = db.query(ApiToken).order_by(ApiToken.created_at.desc()).all()
     return [
         TokenListItem(
+            token_ref=sha256(t.token.encode("utf-8")).hexdigest()[:16],
             token=t.token[:8] + "..." + t.token[-4:],  # 脱敏显示
             name=t.name,
             description=t.description,
@@ -139,11 +414,18 @@ def create_token(
     db: Session = Depends(get_db),
     current_user: AdminUser = Depends(get_current_admin),
 ):
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Token 名称不能为空")
+    existing = db.query(ApiToken).filter(ApiToken.name == name).first()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Token 名称 '{name}' 已存在")
+
     token_str = secrets.token_urlsafe(32)
     now = _now_ms()
     token = ApiToken(
         token=token_str,
-        name=req.name,
+        name=name,
         description=req.description,
         scopes=json.dumps(req.scopes),
         is_active=1,
@@ -152,18 +434,24 @@ def create_token(
     )
     db.add(token)
     db.commit()
-    return CreateTokenResponse(token=token_str, name=req.name, created_at=now)
+    return CreateTokenResponse(token=token_str, name=name, created_at=now)
 
 
 @router.delete("/tokens/{token_name}", response_model=MessageResponse)
 def disable_token(
     token_name: str,
+    created_at: int = Query(..., description="Token 创建时间，用于精确定位记录"),
     db: Session = Depends(get_db),
     _: AdminUser = Depends(get_current_admin),
 ):
-    token = db.query(ApiToken).filter(ApiToken.name == token_name).first()
+    token = db.query(ApiToken).filter(
+        ApiToken.name == token_name,
+        ApiToken.created_at == created_at,
+    ).first()
     if not token:
         raise HTTPException(status_code=404, detail="Token 不存在")
+    if not token.is_active:
+        return MessageResponse(message=f"Token '{token_name}' 已禁用")
     token.is_active = 0
     db.commit()
     return MessageResponse(message=f"Token '{token_name}' 已禁用")
@@ -177,6 +465,8 @@ _ENV_FIELD_MAP: Dict[str, tuple] = {
     "openai_api_key":          ("OPENAI_API_KEY",          True),
     "openai_base_url":         ("OPENAI_BASE_URL",         False),
     "openai_model":            ("OPENAI_MODEL",            False),
+    "latest_model_endpoint":   ("LATEST_MODEL_ENDPOINT",   False),
+    "latest_model_api_key":    ("LATEST_MODEL_API_KEY",    True),
     "gemini_api_key":          ("GEMINI_API_KEY",          True),
     "gemini_base_url":         ("GEMINI_BASE_URL",         False),
     "gemini_flash_model":      ("GEMINI_FLASH_MODEL",      False),
@@ -212,6 +502,8 @@ _JSON_FIELD_MAP: Dict[str, tuple] = {
     "quality_max_retries":          (["quality_assessment", "max_retries"],          int),
     "sched_fetch_enabled":          (["scheduler", "fetch_rsoe_data", "enabled"],    bool),
     "sched_pool_enabled":           (["scheduler", "process_pool", "enabled"],       bool),
+    "sched_inference_enabled":      (["scheduler", "process_inference_queue", "enabled"], bool),
+    "sched_recheck_enabled":        (["scheduler", "recheck_imagery", "enabled"],    bool),
     "sched_report_enabled":         (["scheduler", "generate_daily_report", "enabled"], bool),
     "report_top_events":            (["report_generation", "top_events_count"],      int),
     "report_max_summary_len":       (["report_generation", "max_summary_length"],    int),
@@ -313,10 +605,10 @@ def update_settings(
 
 VALID_JOBS = {
     "fetch_rsoe_data",
-    "check_gee_tasks",
     "process_pool",
+    "process_inference_queue",
     "generate_daily_report",
-    "release_timeout_locks",
+    "recheck_imagery",
 }
 
 
@@ -337,17 +629,115 @@ def trigger_job(
             if job_id == "fetch_rsoe_data":
                 from core.task_scheduler import job_fetch_rsoe
                 job_fetch_rsoe()
-            elif job_id == "process_pool" or job_id == "check_gee_tasks":
+            elif job_id == "process_pool":
                 from core.task_scheduler import job_process_pool
                 job_process_pool()
-            elif job_id == "release_timeout_locks":
-                from core.task_scheduler import job_release_locks
-                job_release_locks()
+            elif job_id == "process_inference_queue":
+                from core.task_scheduler import job_process_inference_queue
+                job_process_inference_queue()
             elif job_id == "generate_daily_report":
                 from core.task_scheduler import job_generate_report
                 job_generate_report()
+            elif job_id == "recheck_imagery":
+                from core.task_scheduler import job_recheck_imagery
+                job_recheck_imagery()
         finally:
             s.close()
 
     background_tasks.add_task(_run)
     return MessageResponse(message=f"任务 '{job_id}' 已触发")
+
+
+@router.post("/gee/reinitialize", response_model=MessageResponse)
+def reinitialize_gee(
+    background_tasks: BackgroundTasks,
+    _: AdminUser = Depends(get_current_admin),
+):
+    """手动重新初始化 GEE（后台执行，立即返回）"""
+    def _run():
+        import core.gee_manager as gm
+        gm._gee_initialized = False
+        from core.gee_manager import initialize_gee
+        initialize_gee()
+
+    background_tasks.add_task(_run)
+    return MessageResponse(message="GEE 重新初始化已在后台启动，请稍后刷新系统状态")
+
+
+@router.get("/export/events")
+def export_events_csv(
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    from models.models import GeeTask
+    from api.events import _build_imagery_count_map
+
+    events = db.query(Event).order_by(Event.event_date.desc()).all()
+    count_map = _build_imagery_count_map(db, [e.uuid for e in events])
+
+    headers = [
+        "uuid", "event_id", "sub_id", "title", "category_name", "country", "severity",
+        "event_date", "status", "pre_image_downloaded", "post_image_downloaded",
+        "pre_imagery_count", "post_imagery_count", "quality_pass", "created_at",
+    ]
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(headers)
+    for e in events:
+        counts = count_map.get(e.uuid, {})
+        pre_c = counts.get("pre", 1 if e.pre_image_downloaded else 0)
+        post_c = counts.get("post", 1 if e.post_image_downloaded else 0)
+        w.writerow([
+            e.uuid, e.event_id, e.sub_id, e.title, e.category_name, e.country, e.severity,
+            datetime.fromtimestamp(e.event_date / 1000, tz=timezone.utc).strftime("%Y-%m-%d") if e.event_date else "",
+            e.status,
+            int(bool(e.pre_image_downloaded)), int(bool(e.post_image_downloaded)),
+            pre_c, post_c, int(bool(e.quality_pass)),
+            datetime.fromtimestamp(e.created_at / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if e.created_at else "",
+        ])
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": "attachment; filename=events.csv"},
+    )
+
+
+@router.get("/export/gee-tasks")
+def export_gee_tasks_csv(
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    from models.models import GeeTask
+
+    rows = (
+        db.query(GeeTask, Event.title)
+        .outerjoin(Event, Event.uuid == GeeTask.uuid)
+        .order_by(GeeTask.created_at.desc())
+        .all()
+    )
+
+    headers = [
+        "id", "event_uuid", "event_title", "task_type", "status",
+        "start_date", "end_date", "image_date", "image_source",
+        "failure_reason", "retry_count", "created_at", "completed_at",
+    ]
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(headers)
+    for t, title in rows:
+        def ts(ms):
+            return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if ms else ""
+        w.writerow([
+            t.id, t.uuid, title or "", t.task_type, t.status,
+            t.start_date, t.end_date,
+            datetime.fromtimestamp(t.image_date / 1000, tz=timezone.utc).strftime("%Y-%m-%d") if t.image_date else "",
+            t.image_source, t.failure_reason, t.retry_count,
+            ts(t.created_at), ts(t.completed_at),
+        ])
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": "attachment; filename=gee_tasks.csv"},
+    )
