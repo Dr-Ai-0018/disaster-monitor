@@ -48,11 +48,11 @@ def _now_ms() -> int:
 
 
 def _task_can_pause(status: str) -> bool:
-    return status in {"pending", "locked"}
+    return False
 
 
 def _task_can_resume(status: str) -> bool:
-    return status in {"pause_requested", "paused", "failed"}
+    return False
 
 
 def _task_to_progress_payload(
@@ -115,7 +115,7 @@ def system_status(
     # 数据库统计
     total_events = db.query(Event).count()
     tasks_pending = db.query(TaskQueue).filter(TaskQueue.status == "pending").count()
-    tasks_locked = db.query(TaskQueue).filter(TaskQueue.status == "locked").count()
+    tasks_running = db.query(TaskQueue).filter(TaskQueue.status == "running").count()
     products_count = db.query(Product).count()
 
     db_size_mb = 0
@@ -163,7 +163,7 @@ def system_status(
             "size_mb": db_size_mb,
             "events_count": total_events,
             "tasks_pending": tasks_pending,
-            "tasks_locked": tasks_locked,
+            "tasks_running": tasks_running,
             "products_count": products_count,
         },
         gee={
@@ -191,9 +191,9 @@ def task_progress_stats(
     return TaskProgressStatsResponse(
         total=len(tasks),
         by_status=by_status,
-        active=sum(by_status.get(key, 0) for key in ["pending", "locked", "pause_requested"]),
-        pause_requested=by_status.get("pause_requested", 0),
-        paused=by_status.get("paused", 0),
+        active=sum(by_status.get(key, 0) for key in ["pending", "running"]),
+        pause_requested=0,
+        paused=0,
         completed=by_status.get("completed", 0),
         failed=by_status.get("failed", 0),
     )
@@ -462,6 +462,8 @@ _ENV_FIELD_MAP: Dict[str, tuple] = {
     "openai_api_key":          ("OPENAI_API_KEY",          True),
     "openai_base_url":         ("OPENAI_BASE_URL",         False),
     "openai_model":            ("OPENAI_MODEL",            False),
+    "latest_model_endpoint":   ("LATEST_MODEL_ENDPOINT",   False),
+    "latest_model_api_key":    ("LATEST_MODEL_API_KEY",    True),
     "gemini_api_key":          ("GEMINI_API_KEY",          True),
     "gemini_base_url":         ("GEMINI_BASE_URL",         False),
     "gemini_flash_model":      ("GEMINI_FLASH_MODEL",      False),
@@ -497,6 +499,7 @@ _JSON_FIELD_MAP: Dict[str, tuple] = {
     "quality_max_retries":          (["quality_assessment", "max_retries"],          int),
     "sched_fetch_enabled":          (["scheduler", "fetch_rsoe_data", "enabled"],    bool),
     "sched_pool_enabled":           (["scheduler", "process_pool", "enabled"],       bool),
+    "sched_inference_enabled":      (["scheduler", "process_inference_queue", "enabled"], bool),
     "sched_recheck_enabled":        (["scheduler", "recheck_imagery", "enabled"],    bool),
     "sched_report_enabled":         (["scheduler", "generate_daily_report", "enabled"], bool),
     "report_top_events":            (["report_generation", "top_events_count"],      int),
@@ -599,10 +602,9 @@ def update_settings(
 
 VALID_JOBS = {
     "fetch_rsoe_data",
-    "check_gee_tasks",
     "process_pool",
+    "process_inference_queue",
     "generate_daily_report",
-    "release_timeout_locks",
     "recheck_imagery",
 }
 
@@ -624,12 +626,12 @@ def trigger_job(
             if job_id == "fetch_rsoe_data":
                 from core.task_scheduler import job_fetch_rsoe
                 job_fetch_rsoe()
-            elif job_id == "process_pool" or job_id == "check_gee_tasks":
+            elif job_id == "process_pool":
                 from core.task_scheduler import job_process_pool
                 job_process_pool()
-            elif job_id == "release_timeout_locks":
-                from core.task_scheduler import job_release_locks
-                job_release_locks()
+            elif job_id == "process_inference_queue":
+                from core.task_scheduler import job_process_inference_queue
+                job_process_inference_queue()
             elif job_id == "generate_daily_report":
                 from core.task_scheduler import job_generate_report
                 job_generate_report()

@@ -277,7 +277,7 @@ def trigger_process(
     if not event:
         raise HTTPException(status_code=404, detail="事件不存在")
 
-    processable_statuses = {"pending", "pool", "checked"}
+    processable_statuses = {"pending", "pool", "checked", "queued"}
     if event.status not in processable_statuses:
         raise HTTPException(
             status_code=400,
@@ -290,13 +290,18 @@ def trigger_process(
         s = get_session_factory()()
         try:
             pm = PoolManager(s)
-            if event.status == "pending":
+            fresh_event = s.query(Event).filter(Event.uuid == uuid).first()
+            current_status = fresh_event.status if fresh_event else event.status
+            if current_status == "pending":
                 pm.process_pending_events(limit=1)
-            elif event.status == "pool":
+            elif current_status == "pool":
                 pm.submit_gee_tasks_for_pool(limit=1)
                 pm.assess_ready_events(limit=1)
-            elif event.status == "checked":
+            elif current_status == "checked":
                 pm.enqueue_checked_events(limit=1)
+                pm.process_pending_inference_tasks(limit=1)
+            elif current_status == "queued":
+                pm.process_pending_inference_tasks(limit=1)
         finally:
             s.close()
 

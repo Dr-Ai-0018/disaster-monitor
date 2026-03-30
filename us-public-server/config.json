@@ -95,15 +95,15 @@
       "interval_hours": 12,
       "description": "每12小时抓取RSOE数据，run_on_startup=true时启动即触发"
     },
-    "check_gee_tasks": {
-      "enabled": true,
-      "interval_hours": 1,
-      "description": "每小时检查GEE任务状态"
-    },
     "process_pool": {
       "enabled": true,
       "interval_hours": 1,
       "description": "每小时处理蓄水池，推进事件状态"
+    },
+    "process_inference_queue": {
+      "enabled": true,
+      "interval_minutes": 5,
+      "description": "每5分钟执行一次 Latest Model 推理队列"
     },
     "recheck_imagery": {
       "enabled": true,
@@ -114,11 +114,6 @@
       "enabled": true,
       "cron": "0 7 * * *",
       "description": "每天早上7点生成日报"
-    },
-    "release_timeout_locks": {
-      "enabled": true,
-      "interval_minutes": 10,
-      "description": "每10分钟释放超时锁"
     },
     "cleanup_old_data": {
       "enabled": true,

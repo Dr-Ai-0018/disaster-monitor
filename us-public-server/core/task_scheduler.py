@@ -15,6 +15,7 @@ PROCESS_PENDING_LIMIT = 5
 PROCESS_GEE_LIMIT = 5
 PROCESS_ASSESS_LIMIT = 5
 PROCESS_ENQUEUE_LIMIT = 5
+PROCESS_INFERENCE_LIMIT = 3
 
 logger = get_logger(__name__)
 
@@ -142,9 +143,9 @@ def job_process_pool():
         db.close()
 
 
-def job_release_locks():
-    """释放超时的任务锁"""
-    logger.info("⏰ [定时] 释放超时锁...")
+def job_process_inference_queue():
+    """执行内部推理队列"""
+    logger.info("⏰ [定时] 执行内部推理队列...")
     from core.pool_manager import PoolManager
     from models.models import get_session_factory
 
@@ -152,10 +153,10 @@ def job_release_locks():
     db = SessionLocal()
     try:
         pm = PoolManager(db)
-        released = pm.release_timeout_locks()
-        logger.info(f"释放超时锁: {released} 个")
+        processed = pm.process_pending_inference_tasks(limit=PROCESS_INFERENCE_LIMIT)
+        logger.info(f"内部推理队列完成: {processed} 个")
     except Exception as e:
-        logger.error(f"释放超时锁失败: {e}")
+        logger.error(f"执行内部推理队列失败: {e}")
     finally:
         db.close()
 
@@ -236,12 +237,14 @@ def setup_scheduler():
             misfire_grace_time=600,
         )
 
-    # 每 10 分钟释放超时锁
-    if sched_cfg.get("release_timeout_locks", {}).get("enabled", True):
+    # 每 5 分钟执行内部推理队列
+    if sched_cfg.get("process_inference_queue", {}).get("enabled", True):
         scheduler.add_job(
-            job_release_locks,
-            IntervalTrigger(minutes=10),
-            id="release_timeout_locks",
+            job_process_inference_queue,
+            IntervalTrigger(
+                minutes=sched_cfg.get("process_inference_queue", {}).get("interval_minutes", 5)
+            ),
+            id="process_inference_queue",
             replace_existing=True,
         )
 

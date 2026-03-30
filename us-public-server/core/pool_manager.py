@@ -4,17 +4,22 @@
 """
 import uuid
 import json
-import time
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, List, Optional
 from sqlalchemy.orm import Session
 
 from config.settings import settings
-from models.models import Event, GeeTask, TaskQueue, EventPool
+from models.models import Event, GeeTask, Product, TaskQueue, EventPool
 from core.gee_manager import GeeManager
+from core.latest_model_client import LatestModelClient
 from core.quality_assessor import QualityAssessor
 from utils.logger import get_logger
-from utils.task_progress import build_initial_progress_state
+from utils.task_progress import (
+    build_initial_progress_state,
+    build_step_details,
+    get_total_steps,
+    safe_json_loads,
+)
 
 logger = get_logger(__name__)
 
@@ -54,6 +59,7 @@ class PoolManager:
         self.gee = GeeManager()
         self.qa = QualityAssessor()
         self.task_cfg = settings.TASK_QUEUE_CONFIG
+        self.latest_model = LatestModelClient()
 
     # ── 1. pending → pool（获取事件详情 + 坐标） ─────────────
 
@@ -409,8 +415,7 @@ class PoolManager:
     # ── 4. checked → queued（加入任务队列） ──────────────────
 
     def enqueue_checked_events(self, limit: int = 50) -> int:
-        """将 checked 事件加入 GPU 任务队列"""
-        from pathlib import Path
+        """将 checked 事件加入内部推理队列"""
 
         events = (
             self.db.query(Event)
@@ -448,7 +453,7 @@ class PoolManager:
                 event.status = "queued"
                 event.updated_at = now
                 enqueued += 1
-                logger.info(f"[{event.uuid[:8]}] 加入任务队列 (priority={priority})")
+                logger.info(f"[{event.uuid[:8]}] 加入推理队列 (priority={priority})")
 
             except Exception as e:
                 logger.error(f"入队失败 {event.uuid}: {e}")
@@ -457,13 +462,7 @@ class PoolManager:
         return enqueued
 
     def _build_task_data(self, event: Event) -> dict:
-        """构建 GPU Worker 需要的任务数据"""
-        from config.settings import settings as cfg
-
-        # 优先使用显式配置的 SERVER_BASE_URL（生产环境必须设置），
-        # 否则回退到 localhost（仅适用于 GPU Worker 与 US Server 同机或同内网的场景）
-        server_host = cfg.SERVER_BASE_URL or f"http://localhost:{cfg.SERVER_PORT}"
-
+        """构建 Latest Model Open API 需要的任务数据"""
         task_definitions = self.task_cfg.get("tasks", [])
 
         details = {}
@@ -475,8 +474,8 @@ class PoolManager:
 
         return {
             "uuid": event.uuid,
-            "pre_image_url": f"{server_host}/storage/images/{event.uuid}/pre_disaster.tif",
-            "post_image_url": f"{server_host}/storage/images/{event.uuid}/post_disaster.tif",
+            "image_path": event.post_image_path or event.pre_image_path,
+            "image_kind": "post_disaster" if event.post_image_path else "pre_disaster",
             "event_details": {
                 "title": event.title,
                 "category": event.category,
@@ -490,6 +489,303 @@ class PoolManager:
             },
             "tasks": task_definitions,
         }
+
+    def _update_step_details(
+        self,
+        task: TaskQueue,
+        pipeline_key: Optional[str] = None,
+        pipeline_status: Optional[str] = None,
+        running_task_type: Optional[str] = None,
+        finish_all_tasks: bool = False,
+        failed_task_type: Optional[str] = None,
+    ):
+        details = safe_json_loads(task.step_details, {}) or build_step_details(task.task_data)
+
+        for item in details.get("pipeline", []):
+            key = item.get("key")
+            if pipeline_key and key == pipeline_key and pipeline_status:
+                item["status"] = pipeline_status
+            elif pipeline_key and pipeline_status == "running" and key != pipeline_key and item.get("status") == "running":
+                item["status"] = "completed"
+
+        for item in details.get("inference_tasks", []):
+            task_type = str(item.get("type") or "")
+            if finish_all_tasks:
+                if item.get("status") != "failed":
+                    item["status"] = "completed"
+                continue
+            if failed_task_type and task_type == failed_task_type:
+                item["status"] = "failed"
+            elif running_task_type and task_type == running_task_type:
+                item["status"] = "running"
+            elif running_task_type and item.get("status") == "running" and task_type != running_task_type:
+                item["status"] = "completed"
+
+        task.step_details = json.dumps(details, ensure_ascii=False)
+
+    def _normalize_inference_result(self, remote_result: Dict[str, Any]) -> Dict[str, Any]:
+        result_items = ((remote_result or {}).get("result") or {}).get("results") or []
+        normalized: Dict[str, Any] = {}
+
+        for idx, item in enumerate(result_items, start=1):
+            task_type = str(item.get("task") or "UNKNOWN")
+            key = f"{idx:02d}_{task_type}"
+            normalized[key] = {
+                "type": task_type,
+                "result": item.get("answer"),
+                "raw_text": item.get("raw_text"),
+                "timing": item.get("timing"),
+                "source": "latest_model_open_api",
+            }
+        return normalized
+
+    def process_pending_inference_tasks(self, limit: int = 3) -> int:
+        """内部轮询执行待处理推理任务，并写入成品池。"""
+        if not self.latest_model.is_configured():
+            logger.warning("Latest Model Open API 未配置，跳过推理任务")
+            return 0
+
+        tasks = (
+            self.db.query(TaskQueue)
+            .filter(TaskQueue.status == "pending")
+            .order_by(TaskQueue.priority.desc(), TaskQueue.created_at.asc())
+            .limit(limit)
+            .all()
+        )
+
+        completed = 0
+        for task in tasks:
+            event = self.db.query(Event).filter(Event.uuid == task.uuid).first()
+            if not event:
+                task.status = "failed"
+                task.failure_reason = "关联事件不存在"
+                task.progress_stage = "failed"
+                task.progress_message = "关联事件不存在，任务无法继续"
+                task.updated_at = _now_ms()
+                continue
+
+            try:
+                task_data = safe_json_loads(task.task_data, {})
+                image_path = task_data.get("image_path")
+                task_defs = task_data.get("tasks") or []
+                now = _now_ms()
+
+                if not image_path:
+                    placeholder_result = {
+                        "00_NO_IMAGE": {
+                            "type": "NO_IMAGE",
+                            "result": "No usable imagery available for remote inference.",
+                            "raw_text": "Skipped remote inference because no pre/post image was available.",
+                            "source": "latest_model_open_api",
+                        }
+                    }
+                    event_snapshot = {
+                        "title": event.title,
+                        "category": event.category,
+                        "category_name": event.category_name,
+                        "country": event.country,
+                        "severity": event.severity,
+                        "longitude": event.longitude,
+                        "latitude": event.latitude,
+                        "event_date": event.event_date,
+                        "details": safe_json_loads(event.details_json, {}),
+                    }
+                    existing_product = self.db.query(Product).filter(Product.uuid == task.uuid).first()
+                    if existing_product:
+                        existing_product.inference_result = json.dumps(placeholder_result, ensure_ascii=False)
+                        existing_product.event_details = json.dumps(event_snapshot, ensure_ascii=False)
+                        existing_product.updated_at = now
+                        existing_product.inference_quality_score = event.quality_score
+                    else:
+                        self.db.add(Product(
+                            uuid=task.uuid,
+                            inference_result=json.dumps(placeholder_result, ensure_ascii=False),
+                            event_details=json.dumps(event_snapshot, ensure_ascii=False),
+                            event_title=event.title,
+                            event_category=event.category,
+                            event_country=event.country,
+                            pre_image_date=event.pre_image_date,
+                            post_image_date=event.post_image_date,
+                            inference_quality_score=event.quality_score,
+                            created_at=now,
+                            updated_at=now,
+                        ))
+                    task.status = "completed"
+                    task.completed_at = now
+                    task.failure_reason = None
+                    task.last_error_details = None
+                    task.progress_stage = "completed"
+                    task.progress_message = "无可用影像，已生成占位成品并跳过远程推理"
+                    task.progress_percent = 100
+                    task.current_step = task.total_steps or get_total_steps(task.task_data)
+                    task.locked_by = "latest-model-api"
+                    task.heartbeat = now
+                    task.updated_at = now
+                    self._update_step_details(task, pipeline_key="prepare_image", pipeline_status="completed")
+                    self._update_step_details(task, pipeline_key="submit_remote_job", pipeline_status="completed")
+                    self._update_step_details(task, pipeline_key="poll_remote_result", pipeline_status="completed")
+                    self._update_step_details(task, pipeline_key="save_product", pipeline_status="completed")
+                    self._update_step_details(task, finish_all_tasks=True)
+                    event.status = "completed"
+                    event.updated_at = now
+                    self.db.commit()
+                    completed += 1
+                    logger.info(f"[{task.uuid[:8]}] 无可用影像，已写入占位成品")
+                    continue
+                if not task_defs:
+                    raise ValueError("未配置任何推理任务")
+
+                task.status = "running"
+                task.locked_by = "latest-model-api"
+                task.locked_at = now
+                task.locked_until = None
+                task.heartbeat = now
+                task.progress_stage = "preparing"
+                task.progress_message = "准备影像并提交到 Latest Model Open API"
+                task.progress_percent = 10
+                task.current_step = 1
+                task.total_steps = task.total_steps or get_total_steps(task.task_data)
+                self._update_step_details(task, pipeline_key="prepare_image", pipeline_status="completed")
+                self._update_step_details(task, pipeline_key="submit_remote_job", pipeline_status="running")
+                task.updated_at = now
+                event.status = "processing"
+                event.updated_at = now
+                self.db.commit()
+
+                submit_resp = self.latest_model.submit_tasks(image_path, task_defs)
+                job_id = submit_resp.get("job_id")
+                if not job_id:
+                    raise RuntimeError(
+                        f"提交远程任务成功但未返回 job_id: "
+                        f"{json.dumps(submit_resp, ensure_ascii=False)[:300]}"
+                    )
+                task.progress_stage = "submitted"
+                task.progress_message = f"远程任务已提交，job_id={job_id}"
+                task.progress_percent = 25
+                task.current_step = 2
+                task.last_error_details = None
+                self._update_step_details(task, pipeline_key="submit_remote_job", pipeline_status="completed")
+                self._update_step_details(task, pipeline_key="poll_remote_result", pipeline_status="running")
+                task.heartbeat = _now_ms()
+                self.db.commit()
+
+                if task_defs:
+                    self._update_step_details(task, running_task_type=str(task_defs[0].get("task") or "UNKNOWN"))
+                task.progress_stage = "polling"
+                task.progress_message = f"远程任务执行中，job_id={job_id}"
+                task.progress_percent = 55
+                task.current_step = min(3, task.total_steps or 3)
+                task.heartbeat = _now_ms()
+                self.db.commit()
+
+                result_payload = self.latest_model.wait_for_result(job_id)
+                result_status = str(result_payload.get("status") or "").lower()
+                if result_status == "failed":
+                    raise RuntimeError(
+                        f"远程推理失败: {json.dumps(result_payload, ensure_ascii=False)[:500]}"
+                    )
+
+                inference_result = self._normalize_inference_result(result_payload)
+                now = _now_ms()
+
+                existing_product = self.db.query(Product).filter(Product.uuid == task.uuid).first()
+                created = existing_product is None
+                event_snapshot = {
+                    "title": event.title,
+                    "category": event.category,
+                    "category_name": event.category_name,
+                    "country": event.country,
+                    "severity": event.severity,
+                    "longitude": event.longitude,
+                    "latitude": event.latitude,
+                    "event_date": event.event_date,
+                    "details": safe_json_loads(event.details_json, {}),
+                }
+
+                if existing_product:
+                    existing_product.inference_result = json.dumps(inference_result, ensure_ascii=False)
+                    existing_product.event_details = json.dumps(event_snapshot, ensure_ascii=False)
+                    existing_product.updated_at = now
+                    existing_product.inference_quality_score = event.quality_score
+                else:
+                    product = Product(
+                        uuid=task.uuid,
+                        inference_result=json.dumps(inference_result, ensure_ascii=False),
+                        event_details=json.dumps(event_snapshot, ensure_ascii=False),
+                        event_title=event.title,
+                        event_category=event.category,
+                        event_country=event.country,
+                        pre_image_date=event.pre_image_date,
+                        post_image_date=event.post_image_date,
+                        inference_quality_score=event.quality_score,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    self.db.add(product)
+
+                task.status = "completed"
+                task.completed_at = now
+                task.failure_reason = None
+                task.last_error_details = None
+                task.progress_stage = "completed"
+                task.progress_message = "远程推理完成，结果已写入成品池"
+                task.progress_percent = 100
+                task.current_step = task.total_steps or get_total_steps(task.task_data)
+                task.locked_by = "latest-model-api"
+                task.heartbeat = now
+                task.updated_at = now
+                self._update_step_details(task, pipeline_key="poll_remote_result", pipeline_status="completed")
+                self._update_step_details(task, pipeline_key="save_product", pipeline_status="completed")
+                self._update_step_details(task, finish_all_tasks=True)
+
+                event.status = "completed"
+                event.updated_at = now
+                self.db.commit()
+                completed += 1
+                logger.info(
+                    f"[{task.uuid[:8]}] Latest Model 推理完成，成品已{'更新' if not created else '创建'}"
+                )
+            except Exception as e:
+                now = _now_ms()
+                current_retry = task.retry_count or 0
+                max_retries = task.max_retries or self.task_cfg.get("max_retries", 3)
+                task.last_error_details = str(e)
+                task.updated_at = now
+
+                if current_retry < max_retries:
+                    retry_state = build_initial_progress_state(task.task_data)
+                    task.retry_count = current_retry + 1
+                    task.status = "pending"
+                    task.locked_by = None
+                    task.locked_at = None
+                    task.locked_until = None
+                    task.heartbeat = None
+                    task.completed_at = None
+                    task.failure_reason = "远程推理失败，等待自动重试"
+                    task.progress_stage = retry_state["progress_stage"]
+                    task.progress_message = f"远程推理失败，等待第 {task.retry_count} 次自动重试"
+                    task.progress_percent = retry_state["progress_percent"]
+                    task.current_step = retry_state["current_step"]
+                    task.total_steps = retry_state["total_steps"]
+                    task.step_details = retry_state["step_details"]
+                    event.status = "queued"
+                else:
+                    task.status = "failed"
+                    task.failure_reason = "远程推理连续失败，已达到最大重试次数"
+                    task.progress_stage = "failed"
+                    task.progress_message = "远程推理失败，任务已停止"
+                    task.progress_percent = min(task.progress_percent or 0, 99)
+                    task.locked_by = None
+                    task.locked_at = None
+                    task.locked_until = None
+                    task.heartbeat = None
+                    event.status = "failed"
+
+                event.updated_at = now
+                self.db.commit()
+                logger.error(f"[{task.uuid[:8]}] Latest Model 推理失败: {e}")
+
+        return completed
 
     # ── 5. 动态影像补全（灾后轮询 + 灾前扩窗） ──────────────
 
@@ -583,91 +879,10 @@ class PoolManager:
             self.db.commit()
         return success
 
-    # ── 6. 释放超时锁 ─────────────────────────────────────
+    # ── 6. 兼容旧入口：执行内部推理队列 ─────────────────────
 
     def release_timeout_locks(self) -> int:
-        """处理超时的执行锁：执行中任务自动重试，暂停请求任务转为已暂停"""
-        now = _now_ms()
-        locked_tasks = (
-            self.db.query(TaskQueue)
-            .filter(
-                TaskQueue.status.in_(["locked", "pause_requested"]),
-                TaskQueue.locked_until < now,
-            )
-            .all()
-        )
-
-        released = 0
-        for task in locked_tasks:
-            event = self.db.query(Event).filter(Event.uuid == task.uuid).first()
-
-            if task.status == "pause_requested":
-                task.status = "paused"
-                task.pause_requested = 0
-                task.paused_at = now
-                task.locked_by = None
-                task.locked_at = None
-                task.locked_until = None
-                task.heartbeat = None
-                task.progress_stage = "paused"
-                task.progress_message = "暂停请求未获 Worker 确认，已因锁超时强制暂停"
-                task.updated_at = now
-                if event:
-                    event.status = "queued"
-                    event.updated_at = now
-                released += 1
-                continue
-
-            current_retry_count = task.retry_count or 0
-            max_retries = task.max_retries or 3
-            retry_state = build_initial_progress_state(task.task_data)
-
-            if current_retry_count < max_retries:
-                next_retry_count = current_retry_count + 1
-                task.status = "pending"
-                task.locked_by = None
-                task.locked_at = None
-                task.locked_until = None
-                task.heartbeat = None
-                task.pause_requested = 0
-                task.paused_at = None
-                task.retry_count = next_retry_count
-                task.failure_reason = "Worker 心跳超时，等待自动重试"
-                task.last_error_details = "任务锁超时释放，系统已重新排队"
-                task.progress_stage = retry_state["progress_stage"]
-                task.progress_message = f"Worker 超时，准备第 {next_retry_count} 次自动重试"
-                task.progress_percent = retry_state["progress_percent"]
-                task.current_step = retry_state["current_step"]
-                task.total_steps = retry_state["total_steps"]
-                task.step_details = retry_state["step_details"]
-
-                if event:
-                    event.status = "queued"
-                    event.updated_at = now
-            else:
-                task.status = "failed"
-                task.failure_reason = "超过最大重试次数"
-                task.last_error_details = "任务锁连续超时，已自动停止，等待人工继续"
-                task.retry_count = current_retry_count
-                task.progress_stage = "failed"
-                task.progress_message = "连续失败已达到上限，任务已自动停止"
-                task.progress_percent = min(task.progress_percent or 0, 99)
-                task.pause_requested = 0
-                task.paused_at = None
-
-                if event:
-                    event.status = "failed"
-                    event.updated_at = now
-
-            if task.status == "failed":
-                task.locked_by = None
-                task.locked_at = None
-                task.locked_until = None
-                task.heartbeat = None
-
-            task.updated_at = now
-            released += 1
-
-        self.db.commit()
-        logger.info(f"释放了 {released} 个超时锁")
-        return released
+        """兼容旧调用名，实际执行一次内部推理队列。"""
+        processed = self.process_pending_inference_tasks(limit=3)
+        logger.info(f"内部推理队列执行完成: {processed} 个")
+        return processed

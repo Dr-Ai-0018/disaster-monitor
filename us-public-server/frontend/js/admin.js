@@ -47,22 +47,16 @@ const TOAST_TYPE_LABELS = {
 
 const TASK_STATUS_LABELS = {
     pending: '待执行',
-    locked: '执行中',
-    pause_requested: '暂停请求中',
-    paused: '已暂停',
+    running: '执行中',
     completed: '已完成',
     failed: '已停止'
 };
 
 const TASK_STAGE_LABELS = {
-    queued: '等待 Worker 拉取',
-    claimed: 'Worker 已接单',
-    downloading_pre: '下载灾前影像',
-    downloading_post: '下载灾后影像',
-    inferencing: '执行模型推理',
-    submitting: '提交推理结果',
-    pause_requested: '等待暂停',
-    paused: '已暂停',
+    queued: '等待内部调度',
+    preparing: '准备影像',
+    submitted: '远程任务已提交',
+    polling: '轮询推理结果',
     completed: '已完成',
     failed: '已停止'
 };
@@ -70,7 +64,7 @@ const TASK_STAGE_LABELS = {
 const JOB_LABELS = {
     fetch_rsoe_data: '抓取 RSOE 数据',
     process_pool: '处理事件池',
-    release_timeout_locks: '释放超时锁',
+    process_inference_queue: '执行推理队列',
     recheck_imagery: '重新检查影像'
 };
 
@@ -81,7 +75,6 @@ const VIEW_LABELS = {
     tasks: '任务进度',
     products: '成品池',
     reports: '灾害日报',
-    tokens: 'API 令牌',
     settings: '系统配置'
 };
 
@@ -220,7 +213,6 @@ function switchView(view) {
         case 'tasks': loadTaskProgress(1); break;
         case 'products': loadProducts(); break;
         case 'reports': loadReports(); break;
-        case 'tokens': loadTokens(); break;
         case 'settings': loadSettings(); break;
     }
 }
@@ -297,7 +289,7 @@ async function loadDashboard() {
             </div>
             <div class="tech-card p-5">
                 <div class="flex justify-between items-start mb-4">
-                    <span class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold">待处理任务</span>
+                    <span class="font-mono text-[10px] text-gray-500 uppercase tracking-widest font-semibold">待推理任务</span>
                     <i data-lucide="clock" class="w-4 h-4 text-black opacity-80"></i>
                 </div>
                 <div class="text-3xl font-mono font-light tracking-tighter">${data.database?.tasks_pending || 0}</div>
@@ -353,8 +345,8 @@ async function loadDashboard() {
                 <span class="font-mono text-xs font-bold ${data.scheduler?.running ? 'text-green-600' : 'text-red-600'}">${data.scheduler?.running ? '运行中' : '已停止'}</span>
             </div>
             <div class="flex justify-between py-3 border-b border-gray-100">
-                <span class="font-mono text-xs uppercase tracking-wider text-gray-500">锁定任务</span>
-                <span class="font-mono text-xs font-bold">${data.database?.tasks_locked || 0}</span>
+                <span class="font-mono text-xs uppercase tracking-wider text-gray-500">运行中任务</span>
+                <span class="font-mono text-xs font-bold">${data.database?.tasks_running || 0}</span>
             </div>
             <div class="flex justify-between py-3">
                 <span class="font-mono text-xs uppercase tracking-wider text-gray-500">系统</span>
@@ -830,7 +822,7 @@ async function loadTaskProgress(page = 1) {
 
         const tbody = document.getElementById('tasks-tbody');
         tbody.innerHTML = tasks.map(task => `
-            <tr class="border-b border-gray-100 hover:bg-gray-50 ${task.pause_requested ? 'bg-amber-50/50' : ''}">
+            <tr class="border-b border-gray-100 hover:bg-gray-50">
                 <td class="py-3 px-4 align-top">
                     <div class="font-semibold max-w-xs truncate" title="${escapeHtml(task.event_title || task.uuid)}">${escapeHtml(task.event_title || '未命名事件')}</div>
                     <div class="text-[10px] text-gray-500 mt-1">${escapeHtml(task.uuid)}</div>
@@ -870,8 +862,8 @@ function renderTaskStatsRow(stats) {
     el.innerHTML = [
         ['全部任务', stats?.total ?? '—'],
         ['活跃中', stats?.active ?? 0],
-        ['暂停请求', stats?.pause_requested ?? byStatus.pause_requested ?? 0],
-        ['已暂停', stats?.paused ?? byStatus.paused ?? 0],
+        ['运行中', byStatus.running ?? 0],
+        ['待处理', byStatus.pending ?? 0],
         ['已停止', stats?.failed ?? byStatus.failed ?? 0],
     ].map(([label, value]) => `
         <div class="tech-card p-4">
@@ -883,7 +875,7 @@ function renderTaskStatsRow(stats) {
 
 function renderTaskStatusCell(task) {
     const statusClass = getTaskStatusClass(task.task_status);
-    const detail = task.pause_requested ? '等待当前子步骤结束后暂停' : (task.event_status ? `事件: ${labelStatus(task.event_status)}` : '任务队列');
+        const detail = task.event_status ? `事件: ${labelStatus(task.event_status)}` : '内部推理队列';
     return `
         <div class="space-y-2">
             <span class="px-2 py-1 ${statusClass} text-[10px] font-bold uppercase inline-flex">${labelTaskStatus(task.task_status)}</span>
@@ -933,9 +925,9 @@ function renderTaskProgressCell(task) {
 function renderTaskWorkerCell(task) {
     return `
         <div class="text-[10px] leading-5 text-gray-600">
-            <div>Worker: <span class="font-bold text-gray-800">${escapeHtml(task.locked_by || '待分配')}</span></div>
-            <div>心跳: <span class="font-bold text-gray-800">${formatDateTime(task.heartbeat)}</span></div>
-            <div>锁定至: <span class="font-bold text-gray-800">${formatDateTime(task.locked_until)}</span></div>
+            <div>执行器: <span class="font-bold text-gray-800">${escapeHtml(task.locked_by || '内部调度')}</span></div>
+            <div>最近更新: <span class="font-bold text-gray-800">${formatDateTime(task.heartbeat)}</span></div>
+            <div>完成时间: <span class="font-bold text-gray-800">${formatDateTime(task.completed_at)}</span></div>
         </div>
     `;
 }
@@ -973,7 +965,7 @@ async function showTaskProgressDetail(uuid) {
                     <div><span class="text-gray-500 uppercase">事件标题</span><div class="font-bold mt-1">${escapeHtml(task.event_title || '暂无')}</div></div>
                     <div><span class="text-gray-500 uppercase">事件状态</span><div class="font-bold mt-1">${escapeHtml(labelStatus(task.event_status))}</div></div>
                     <div><span class="text-gray-500 uppercase">任务 UUID</span><div class="font-bold mt-1 break-all">${escapeHtml(task.uuid)}</div></div>
-                    <div><span class="text-gray-500 uppercase">Worker</span><div class="font-bold mt-1">${escapeHtml(task.locked_by || '待分配')}</div></div>
+                    <div><span class="text-gray-500 uppercase">执行器</span><div class="font-bold mt-1">${escapeHtml(task.locked_by || '内部调度')}</div></div>
                     <div><span class="text-gray-500 uppercase">当前阶段</span><div class="font-bold mt-1">${escapeHtml(labelTaskStage(task.progress_stage))}</div></div>
                     <div><span class="text-gray-500 uppercase">步骤进度</span><div class="font-bold mt-1">${task.current_step || 0} / ${task.total_steps || 0}</div></div>
                     <div><span class="text-gray-500 uppercase">自动重试</span><div class="font-bold mt-1">${task.retry_count || 0} / ${task.max_retries || 3}</div></div>
@@ -1475,7 +1467,7 @@ async function triggerJob(job) {
     const jobMap = {
         'fetch': 'fetch_rsoe_data',
         'pool': 'process_pool',
-        'unlock': 'release_timeout_locks',
+        'unlock': 'process_inference_queue',
         'recheck': 'recheck_imagery',
     };
 
@@ -1519,7 +1511,7 @@ function renderPagination(containerId, current, total, loadFn) {
 // 分页辅助：通过函数名反查
 window._pgCall = function(name, page) {
     const map = {
-        loadEvents, loadRawPool, loadTrack, loadTaskProgress,
+        loadEvents, loadRawPool, loadTrack, loadTaskProgress, loadProducts, loadReports,
     };
     if (map[name]) map[name](page);
 };
@@ -1635,9 +1627,7 @@ function labelSeverity(severity) {
 function getTaskStatusClass(status) {
     const map = {
         pending: 'bg-gray-100 text-gray-700',
-        locked: 'bg-blue-100 text-blue-700',
-        pause_requested: 'bg-amber-100 text-amber-700',
-        paused: 'bg-yellow-100 text-yellow-700',
+        running: 'bg-blue-100 text-blue-700',
         completed: 'bg-green-100 text-green-700',
         failed: 'bg-red-100 text-red-700'
     };

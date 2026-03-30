@@ -42,18 +42,17 @@ def normalize_task_definitions(task_data_raw: Any) -> List[Dict[str, Any]]:
 
 
 def get_total_steps(task_data_raw: Any) -> int:
-    # 2 个下载阶段 + N 个推理子任务 + 1 个提交阶段。
-    # 当任务配置为空时，仍保留 4 个主阶段，避免进度总步数小于流程阶段数。
+    # 3 个主阶段 + N 个推理子任务。
     return max(len(normalize_task_definitions(task_data_raw)) + 3, 4)
 
 
 def build_step_details(task_data_raw: Any) -> Dict[str, Any]:
     return {
         "pipeline": [
-            {"key": "download_pre", "label": "下载灾前影像", "status": "pending"},
-            {"key": "download_post", "label": "下载灾后影像", "status": "pending"},
-            {"key": "inference", "label": "执行推理任务", "status": "pending"},
-            {"key": "submit", "label": "提交结果", "status": "pending"},
+            {"key": "prepare_image", "label": "准备影像", "status": "pending"},
+            {"key": "submit_remote_job", "label": "提交远程推理任务", "status": "pending"},
+            {"key": "poll_remote_result", "label": "轮询远程推理结果", "status": "pending"},
+            {"key": "save_product", "label": "写入成品池", "status": "pending"},
         ],
         "inference_tasks": [
             {
@@ -71,7 +70,7 @@ def build_initial_progress_state(task_data_raw: Any) -> Dict[str, Any]:
     total_steps = get_total_steps(task_data_raw)
     return {
         "progress_stage": "queued",
-        "progress_message": "等待 Worker 拉取任务",
+        "progress_message": "等待服务内部调度推理任务",
         "progress_percent": 0,
         "current_step": 0,
         "total_steps": total_steps,
