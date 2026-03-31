@@ -51,11 +51,11 @@ def _now_ms() -> int:
 
 
 def _task_can_pause(status: str) -> bool:
-    return False
+    return status in {"pending", "running"}
 
 
 def _task_can_resume(status: str) -> bool:
-    return False
+    return status in {"pause_requested", "paused", "failed"}
 
 
 def _task_to_progress_payload(
@@ -302,7 +302,7 @@ def pause_task_progress(
         db.commit()
         return MessageResponse(message="任务已暂停")
 
-    if task.status == "locked":
+    if task.status in {"locked", "running"}:
         task.status = "pause_requested"
         task.pause_requested = 1
         task.progress_stage = "pause_requested"
@@ -341,7 +341,7 @@ def resume_task_progress(
         lock_is_alive = bool(task.locked_by and task.locked_until and task.locked_until > now)
 
         if lock_is_alive:
-            task.status = "locked"
+            task.status = "running"
             task.pause_requested = 0
             task.paused_at = None
             task.progress_stage = "claimed" if task.progress_stage == "pause_requested" else task.progress_stage

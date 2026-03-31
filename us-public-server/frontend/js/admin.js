@@ -2148,7 +2148,10 @@ async function _wfTriggerInference() {
     const btn = document.getElementById('wf-trigger-btn');
     if (btn) { btn.disabled = true; btn.textContent = '提交中...'; }
     try {
-        const resp = await authFetch(`${EVENTS_API}/${ev.uuid}/process`, { method: 'POST' });
+        const resp = await authFetch(`${EVENTS_API}/${ev.uuid}/process`, {
+            method: 'POST',
+            body: JSON.stringify({ image_type: _workflowImageType || null }),
+        });
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({ detail: resp.statusText }));
             throw new Error(err.detail || resp.statusText);

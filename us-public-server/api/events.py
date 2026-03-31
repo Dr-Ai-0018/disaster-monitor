@@ -9,11 +9,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from models.models import AdminUser, Event, GeeTask, get_db
+from models.models import AdminUser, Event, GeeTask, TaskQueue, get_db
 from schemas.schemas import (
-    EventListResponse, EventSummary, EventDetail, EventStatsResponse, MessageResponse
+    EventListResponse, EventSummary, EventDetail, EventStatsResponse, MessageResponse, ProcessEventRequest
 )
 from utils.auth import get_current_admin
+from utils.task_progress import build_initial_progress_state, safe_json_loads
 
 router = APIRouter(prefix="/api/events", tags=["事件管理"])
 
@@ -309,6 +310,7 @@ def get_event(
 def trigger_process(
     uuid: str,
     background_tasks: BackgroundTasks,
+    req: Optional[ProcessEventRequest] = None,
     db: Session = Depends(get_db),
     _: AdminUser = Depends(get_current_admin),
 ):
@@ -322,6 +324,36 @@ def trigger_process(
             status_code=400,
             detail=f"当前状态 {event.status} 不支持手动推进",
         )
+
+    selected_image_type = (req.image_type if req else None) or None
+    if selected_image_type not in {None, "pre", "post"}:
+        raise HTTPException(status_code=400, detail="image_type 仅支持 pre 或 post")
+
+    if selected_image_type == "pre" and not event.pre_image_path:
+        raise HTTPException(status_code=400, detail="当前事件没有可用的灾前影像")
+    if selected_image_type == "post" and not event.post_image_path:
+        raise HTTPException(status_code=400, detail="当前事件没有可用的灾后影像")
+
+    existing_task = db.query(TaskQueue).filter(TaskQueue.uuid == uuid).first()
+    if existing_task and selected_image_type:
+        from core.pool_manager import PoolManager
+        pm = PoolManager(db)
+        task_data = safe_json_loads(existing_task.task_data, {}) or {}
+        rebuilt = pm._build_task_data(event, preferred_image_type=selected_image_type)
+        task_data["image_path"] = rebuilt.get("image_path")
+        task_data["image_kind"] = rebuilt.get("image_kind")
+        task_data["selected_image_type"] = selected_image_type
+        existing_task.task_data = json.dumps(task_data, ensure_ascii=False)
+        if existing_task.status == "pending":
+            initial_state = build_initial_progress_state(task_data)
+            existing_task.progress_stage = initial_state["progress_stage"]
+            existing_task.progress_message = "已切换手动选择影像，等待服务内部调度推理任务"
+            existing_task.progress_percent = initial_state["progress_percent"]
+            existing_task.current_step = initial_state["current_step"]
+            existing_task.total_steps = initial_state["total_steps"]
+            existing_task.step_details = initial_state["step_details"]
+        existing_task.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+        db.commit()
 
     def _run():
         from core.pool_manager import PoolManager
@@ -337,10 +369,10 @@ def trigger_process(
                 pm.submit_gee_tasks_for_pool(limit=1)
                 pm.assess_ready_events(limit=1)
             elif current_status == "checked":
-                pm.enqueue_checked_events(limit=1)
-                pm.process_pending_inference_tasks(limit=1)
+                pm.enqueue_checked_events(limit=1, target_uuid=uuid, preferred_image_type=selected_image_type)
+                pm.process_pending_inference_tasks(limit=1, target_uuid=uuid)
             elif current_status == "queued":
-                pm.process_pending_inference_tasks(limit=1)
+                pm.process_pending_inference_tasks(limit=1, target_uuid=uuid)
         finally:
             s.close()
 

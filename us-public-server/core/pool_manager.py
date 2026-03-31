@@ -414,15 +414,19 @@ class PoolManager:
 
     # ── 4. checked → queued（加入任务队列） ──────────────────
 
-    def enqueue_checked_events(self, limit: int = 50) -> int:
+    def enqueue_checked_events(
+        self,
+        limit: int = 50,
+        target_uuid: Optional[str] = None,
+        preferred_image_type: Optional[str] = None,
+    ) -> int:
         """将 checked 事件加入内部推理队列"""
 
-        events = (
-            self.db.query(Event)
-            .filter(Event.status == "checked")
-            .limit(limit)
-            .all()
-        )
+        query = self.db.query(Event).filter(Event.status == "checked")
+        if target_uuid:
+            query = query.filter(Event.uuid == target_uuid)
+
+        events = query.limit(limit).all()
 
         enqueued = 0
         for event in events:
@@ -434,7 +438,7 @@ class PoolManager:
                 continue
 
             try:
-                task_data = self._build_task_data(event)
+                task_data = self._build_task_data(event, preferred_image_type=preferred_image_type)
                 priority = _calc_priority(event)
                 now = _now_ms()
 
@@ -461,9 +465,26 @@ class PoolManager:
         self.db.commit()
         return enqueued
 
-    def _build_task_data(self, event: Event) -> dict:
+    def _resolve_task_image(
+        self,
+        event: Event,
+        preferred_image_type: Optional[str] = None,
+    ) -> tuple[Optional[str], str]:
+        preferred = (preferred_image_type or "").strip().lower()
+        if preferred == "pre":
+            return event.pre_image_path, "pre_disaster"
+        if preferred == "post":
+            return event.post_image_path, "post_disaster"
+        if event.post_image_path:
+            return event.post_image_path, "post_disaster"
+        if event.pre_image_path:
+            return event.pre_image_path, "pre_disaster"
+        return None, "pre_disaster"
+
+    def _build_task_data(self, event: Event, preferred_image_type: Optional[str] = None) -> dict:
         """构建 Latest Model Open API 需要的任务数据"""
         task_definitions = self.task_cfg.get("tasks", [])
+        image_path, image_kind = self._resolve_task_image(event, preferred_image_type)
 
         details = {}
         if event.details_json:
@@ -474,8 +495,9 @@ class PoolManager:
 
         return {
             "uuid": event.uuid,
-            "image_path": event.post_image_path or event.pre_image_path,
-            "image_kind": "post_disaster" if event.post_image_path else "pre_disaster",
+            "image_path": image_path,
+            "image_kind": image_kind,
+            "selected_image_type": preferred_image_type if preferred_image_type in {"pre", "post"} else None,
             "event_details": {
                 "title": event.title,
                 "category": event.category,
@@ -539,15 +561,18 @@ class PoolManager:
             }
         return normalized
 
-    def process_pending_inference_tasks(self, limit: int = 3) -> int:
+    def process_pending_inference_tasks(self, limit: int = 3, target_uuid: Optional[str] = None) -> int:
         """内部轮询执行待处理推理任务，并写入成品池。"""
         if not self.latest_model.is_configured():
             logger.warning("Latest Model Open API 未配置，跳过推理任务")
             return 0
 
+        query = self.db.query(TaskQueue).filter(TaskQueue.status == "pending")
+        if target_uuid:
+            query = query.filter(TaskQueue.uuid == target_uuid)
+
         tasks = (
-            self.db.query(TaskQueue)
-            .filter(TaskQueue.status == "pending")
+            query
             .order_by(TaskQueue.priority.desc(), TaskQueue.created_at.asc())
             .limit(limit)
             .all()

@@ -106,6 +106,10 @@ class EventStatsResponse(BaseModel):
     by_imagery_status: Optional[Dict[str, int]] = None
 
 
+class ProcessEventRequest(BaseModel):
+    image_type: Optional[str] = Field(default=None, pattern="^(pre|post)?$")
+
+
 # ──────────────────────────────────────────
 # Task Queue (GPU Server)
 # ──────────────────────────────────────────
