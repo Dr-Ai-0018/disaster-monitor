@@ -12,8 +12,10 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from models.models import DailyReport, Product, Event, get_db
+from utils.logger import get_logger
 
 router = APIRouter(prefix="/api/public", tags=["公开访问"])
+logger = get_logger(__name__)
 
 
 # ── 日报 ──────────────────────────────────────────────
@@ -258,8 +260,17 @@ def get_satellite_image_enhanced(
 
     try:
         import numpy as np
-        from PIL import Image
+    except Exception as e:
+        logger.exception(f"增强影像依赖加载失败（numpy） uuid={uuid} image_type={image_type}: {e}")
+        raise HTTPException(status_code=501, detail=f"增强依赖加载失败: numpy ({e})")
 
+    try:
+        from PIL import Image
+    except Exception as e:
+        logger.exception(f"增强影像依赖加载失败（Pillow） uuid={uuid} image_type={image_type}: {e}")
+        raise HTTPException(status_code=501, detail=f"增强依赖加载失败: Pillow ({e})")
+
+    try:
         with Image.open(path) as img:
             arr = np.array(img.convert("RGB")).astype(np.float32)
 
@@ -282,7 +293,6 @@ def get_satellite_image_enhanced(
             media_type="image/png",
             headers={"Cache-Control": "public, max-age=86400"},
         )
-    except ImportError:
-        raise HTTPException(status_code=501, detail="numpy 未安装，无法执行增强处理")
     except Exception as e:
+        logger.exception(f"增强影像处理失败 uuid={uuid} image_type={image_type} path={path}: {e}")
         raise HTTPException(status_code=500, detail=f"影像增强失败: {e}")
