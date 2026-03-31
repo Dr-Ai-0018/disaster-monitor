@@ -1,5 +1,10 @@
 # 灾害监测系统 - 部署指南
 
+> 说明
+>
+> 当前推荐部署方式已统一为：`us-public-server` 直接调用 `Latest Model Open API` 完成推理。
+> 旧版 `/api/tasks/*` + GPU Worker 拉任务方案不再作为正式主链路。
+
 ## 📋 系统架构
 
 ```
@@ -22,7 +27,6 @@
 │  /api/events/*   - 事件管理API (JWT)                        │
 │  /api/products/* - 成品池API (JWT)                          │
 │  /api/reports/*  - 日报API (JWT)                            │
-│  /api/tasks/*    - GPU任务队列API (API Token)              │
 │  /api/admin/*    - 系统管理API (JWT)                        │
 └─────────────────────────────────────────────────────────────┘
                               ↓
@@ -44,7 +48,7 @@
 │  events          - 处理中的事件                             │
 │  event_pool      - 全局去重事件池 ⭐ NEW                    │
 │  gee_tasks       - GEE下载任务                              │
-│  task_queue      - GPU推理队列                              │
+│  task_queue      - Latest Model 推理队列                    │
 │  products        - 完成的成品                               │
 │  daily_reports   - 日报存档                                 │
 │  admin_users     - 管理员账户                               │
@@ -149,11 +153,12 @@ python database/init_db.py
 # 创建管理员账户
 python database/create_admin.py
 # 输入: 用户名、密码
+```
 
-# 创建GPU Worker的API Token
+如需给外部调试脚本或集成工具单独分配访问令牌，可额外执行：
+
+```bash
 python database/create_token.py
-# 输入: Token名称
-# ⚠️ 保存输出的Token，仅显示一次！
 ```
 
 ---
@@ -289,8 +294,8 @@ sudo certbot --nginx -d disaster-monitor.yourdomain.com
     }
   },
   "task_queue": {
-    "default_lock_duration_seconds": 7200,  // GPU任务锁定时长
-    "heartbeat_interval_seconds": 300,      // 心跳间隔
+    "default_lock_duration_seconds": 7200,  // 内部推理任务锁定时长
+    "heartbeat_interval_seconds": 300,      // 轮询/活跃刷新间隔
     "max_retries": 3                        // 最大重试次数
   },
   "gee": {
@@ -394,7 +399,7 @@ LOG_LEVEL=INFO  # DEBUG, INFO, WARNING, ERROR, CRITICAL
 2. **限制API访问**
    - 配置防火墙仅开放必要端口
    - 使用Nginx限流
-   - 定期审查API Token使用情况
+   - 定期审查管理员与集成令牌使用情况
 
 3. **数据备份**
    - 每日自动备份数据库
@@ -449,6 +454,6 @@ A: 检查：
 - ✨ 全新架构：前后端完全分离
 - ⭐ 新增全局事件池（去重机制）
 - 🎨 专业化UI设计
-- 🔐 JWT认证 + API Token双重认证
+- 🔐 JWT 管理认证 + 可选集成令牌
 - 📊 实时数据统计展示
 - 🚀 性能优化和代码重构

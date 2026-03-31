@@ -4,7 +4,12 @@
 
 - **Base URL**: `http://your-server.com` 或 `http://localhost:8000`
 - **API版本**: v1.0.0
-- **认证方式**: JWT Bearer Token（管理员接口） / API Token（GPU Worker接口）
+- **认证方式**: JWT Bearer Token（管理员接口）
+
+> 说明
+>
+> 当前正式推理主链路为 `Latest Model Open API`。
+> 历史版本中提到的 `/api/tasks/*` GPU Worker 接口已经不再作为正式方案，文档残留段落仅供迁移参考，不应再作为新部署依据。
 
 ---
 
@@ -186,114 +191,36 @@ Response:
 
 ---
 
-## GPU 任务队列 API（需要API Token认证）
+## 推理执行说明（Latest Model Open API）
 
-### 拉取任务
+当前服务端不会向外暴露 `/api/tasks/*` Worker 队列接口。
+正式推理流程为：
+
+1. 事件通过 `/api/events/{uuid}/process` 或调度器进入 `task_queue`
+2. 服务端内部使用 `LatestModelClient` 调用远端 `Latest Model Open API`
+3. 服务端轮询远端任务状态
+4. 推理结果统一写入 `products`
+
+可观测入口：
+
+- `GET /api/admin/tasks/{uuid}`：查看任务进度、阶段、失败原因
+- `GET /api/products/{uuid}`：查看推理成品
+- `POST /api/admin/workflow-lab/events/{uuid}/inference`：在管理后台测试台里手动触发指定事件推理
+
+示例：
+
 ```http
-POST /api/tasks/pull
-X-API-Token: your_api_token
-Content-Type: application/json
-
-{
-  "worker_id": "gpu-worker-01",
-  "limit": 1
-}
+GET /api/admin/tasks/{uuid}
+Authorization: Bearer {token}
 
 Response:
 {
-  "tasks": [
-    {
-      "id": 123,
-      "uuid": "event-uuid-here",
-      "priority": 150,
-      "task_data": {
-        "uuid": "...",
-        "pre_image_url": "http://.../pre_disaster.tif",
-        "post_image_url": "http://.../post_disaster.tif",
-        "event_details": {...},
-        "tasks": [...]
-      },
-      "locked_by": "gpu-worker-01",
-      "locked_until": 1704160800000,
-      "created_at": 1704153600000
-    }
-  ],
-  "count": 1
-}
-```
-
-### 提交任务结果
-```http
-PUT /api/tasks/{uuid}/result
-X-API-Token: your_api_token
-Content-Type: application/json
-
-{
-  "worker_id": "gpu-worker-01",
-  "status": "success",
-  "inference_result": {
-    "IMG_CAP": {
-      "type": "IMG_CAP",
-      "result": "Satellite imagery shows...",
-      "error": null
-    },
-    "IMG_VQA": {...},
-    // ... 其他7个任务结果
-  },
-  "processing_time_seconds": 45.3,
-  "model_info": {
-    "model_name": "disaster-model-v1",
-    "device": "cuda:0"
-  }
-}
-
-Response:
-{
-  "message": "Result submitted successfully",
-  "uuid": "...",
-  "status": "completed",
-  "created": true
-}
-```
-
-### 心跳更新
-```http
-POST /api/tasks/{uuid}/heartbeat
-X-API-Token: your_api_token
-Content-Type: application/json
-
-{
-  "worker_id": "gpu-worker-01"
-}
-
-Response:
-{
-  "message": "Heartbeat updated",
-  "uuid": "...",
-  "heartbeat": 1704155400000,
-  "locked_until": 1704160800000
-}
-```
-
-### 任务失败报告
-```http
-POST /api/tasks/{uuid}/fail
-X-API-Token: your_api_token
-Content-Type: application/json
-
-{
-  "worker_id": "gpu-worker-01",
-  "reason": "CUDA out of memory",
-  "error_details": "RuntimeError: ...",
-  "can_retry": true
-}
-
-Response:
-{
-  "message": "Task marked as failed",
-  "uuid": "...",
-  "retry_count": 1,
-  "will_retry": true
+  "uuid": "event-uuid-here",
+  "task_status": "running",
+  "progress_stage": "polling",
+  "progress_message": "远程任务执行中，job_id=...",
+  "progress_percent": 55,
+  "failure_reason": null
 }
 ```
 
@@ -466,8 +393,8 @@ Response:
 [
   {
     "token": "abc123...xyz",
-    "name": "gpu-worker-token",
-    "description": "GPU服务器访问令牌",
+    "name": "integration-debug-token",
+    "description": "外部集成或调试脚本访问令牌",
     "is_active": true,
     "usage_count": 1234,
     "last_used": 1704153600000,
@@ -483,15 +410,15 @@ Authorization: Bearer {token}
 Content-Type: application/json
 
 {
-  "name": "new-worker-token",
-  "description": "新的Worker令牌",
-  "scopes": ["tasks.read", "tasks.update"]
+  "name": "new-integration-token",
+  "description": "新的调试/集成令牌",
+  "scopes": ["integration.read", "integration.write"]
 }
 
 Response:
 {
   "token": "完整的token字符串（仅显示一次）",
-  "name": "new-worker-token",
+  "name": "new-integration-token",
   "created_at": 1704153600000
 }
 ```
@@ -556,8 +483,8 @@ Response:
 - `pending` - 待处理（刚抓取）
 - `pool` - 蓄水池（已获取坐标）
 - `checked` - 质检通过（影像质量合格）
-- `queued` - 已入队（等待GPU处理）
-- `processing` - 推理中（GPU正在处理）
+- `queued` - 已入队（等待 Latest Model Open API 执行）
+- `processing` - 推理中（服务端正在轮询远端结果）
 - `completed` - 已完成（推理完成）
 - `failed` - 失败
 
@@ -584,7 +511,7 @@ Response:
 ## 速率限制
 
 - 管理员接口: 1000 请求/小时
-- GPU任务接口: 10000 请求/小时
+- Workflow Lab / 推理测试接口: 10000 请求/小时
 - 公开接口（事件池）: 无限制
 
 ---
@@ -601,4 +528,4 @@ Response:
 - 初始版本发布
 - 实现全局事件池（去重机制）
 - 前后端完全分离
-- 支持JWT和API Token双认证
+- 管理员接口使用 JWT，集成令牌用于外部调试和扩展

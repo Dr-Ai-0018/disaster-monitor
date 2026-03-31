@@ -27,12 +27,6 @@ if not exist "database\disaster.db" (
     echo    创建管理员账户...
     python database\create_admin.py
     echo.
-    echo    创建 API Token...
-    python database\create_token.py
-    echo.
-    echo    ⚠️  请复制上面的 Token 并更新到 tests\test_gpu_simulator.py 第 12 行
-    echo.
-    pause
 ) else (
     echo    ✅ 数据库已存在
 )
@@ -53,8 +47,8 @@ start /B python main.py
 timeout /t 3 /nobreak >nul
 
 echo.
-echo [4/4] 运行 GPU 模拟器...
-echo    ⚠️  确保已在 tests\test_gpu_simulator.py 中配置正确的 API_TOKEN
+echo [4/4] 运行 Latest Model Open API 测试器...
+echo    ⚠️  确保已在 .env 中配置 LATEST_MODEL_ENDPOINT 和 LATEST_MODEL_API_KEY
 echo.
 pause
 python tests\test_gpu_simulator.py

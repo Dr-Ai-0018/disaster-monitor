@@ -16,6 +16,19 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _resolve_sample_images() -> tuple[str, str]:
+    """优先复用仓库内现有影像，避免生成的测试任务指向不存在的文件。"""
+    storage_root = Path(__file__).resolve().parent.parent / "storage" / "images"
+    for folder in storage_root.iterdir():
+        if not folder.is_dir():
+            continue
+        pre_path = folder / "pre_disaster.tif"
+        post_path = folder / "post_disaster.tif"
+        if pre_path.exists() and post_path.exists():
+            return str(pre_path), str(post_path)
+    raise FileNotFoundError("未在 storage/images 中找到可复用的 pre/post 测试影像")
+
+
 def create_test_event():
     """创建一个测试灾害事件"""
     SessionLocal = get_session_factory()
@@ -63,12 +76,18 @@ def create_test_event():
 
 
 def create_ready_task():
-    """创建一个已入队的测试任务（可直接被 GPU 拉取）"""
+    """创建一个已入队的测试任务（可直接进入 Latest Model 队列测试）"""
     SessionLocal = get_session_factory()
     db = SessionLocal()
     
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     event_uuid = str(uuid.uuid4())
+    try:
+        pre_image_path, post_image_path = _resolve_sample_images()
+    except FileNotFoundError as e:
+        print(f"❌ 创建失败: {e}")
+        db.close()
+        return None, None
     
     # 1. 创建事件
     event = Event(
@@ -90,8 +109,8 @@ def create_ready_task():
         longitude=139.6503,
         pre_image_downloaded=1,
         post_image_downloaded=1,
-        pre_image_path="/storage/images/test_eq_pre.tif",
-        post_image_path="/storage/images/test_eq_post.tif",
+        pre_image_path=pre_image_path,
+        post_image_path=post_image_path,
         quality_pass=1,
         quality_score=0.92,
     )
@@ -101,14 +120,20 @@ def create_ready_task():
         "uuid": event_uuid,
         "pre_image_url": event.pre_image_path,
         "post_image_url": event.post_image_path,
+        "image_path": event.post_image_path,
+        "image_kind": "post_disaster",
+        "selected_image_type": "post",
         "event_details": {
             "event_id": event.event_id,
             "title": event.title,
             "category": event.category,
+            "category_name": event.category_name,
             "country": event.country,
             "severity": event.severity,
             "latitude": event.latitude,
             "longitude": event.longitude,
+            "event_date": event.event_date,
+            "details": {},
         },
         "tasks": [
             {"task_id": 1, "type": "IMG_CAP", "prompt": "Describe this disaster scene in detail."},
@@ -134,13 +159,14 @@ def create_ready_task():
         db.add(event)
         db.add(task)
         db.commit()
-        print(f"✅ 可拉取测试任务创建成功:")
+        print(f"✅ Latest Model 队列测试任务创建成功:")
         print(f"   UUID: {event.uuid}")
         print(f"   Event ID: {event.event_id}")
         print(f"   标题: {event.title}")
         print(f"   任务状态: {task.status}")
         print(f"   优先级: {task.priority}")
-        print(f"\n💡 现在可以运行 GPU 模拟器拉取此任务:")
+        print(f"   使用影像: {task_data['image_kind']} -> {task_data['image_path']}")
+        print(f"\n💡 现在可以运行 Latest Model Open API 测试器验证链路:")
         print(f"   python tests/test_gpu_simulator.py")
         return event, task
     except Exception as e:
@@ -161,9 +187,9 @@ if __name__ == "__main__":
     print("=" * 60)
     
     if len(sys.argv) > 1 and sys.argv[1] == "--ready":
-        print("\n创建已入队的测试任务（可直接被 GPU 拉取）...\n")
+        print("\n创建已入队的测试任务（可直接进入 Latest Model 队列测试）...\n")
         create_ready_task()
     else:
         print("\n创建基础测试事件（需手动推进流程）...\n")
         create_test_event()
-        print("\n提示: 使用 --ready 参数创建可直接拉取的任务")
+        print("\n提示: 使用 --ready 参数创建可直接进入推理队列的任务")

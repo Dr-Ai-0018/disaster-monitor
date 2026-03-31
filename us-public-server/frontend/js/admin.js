@@ -48,15 +48,19 @@ const TOAST_TYPE_LABELS = {
 const TASK_STATUS_LABELS = {
     pending: '待执行',
     running: '执行中',
+    paused: '已暂停',
+    pause_requested: '暂停中',
     completed: '已完成',
     failed: '已停止'
 };
 
 const TASK_STAGE_LABELS = {
-    queued: '等待内部调度',
+    queued: '等待 Latest Model 队列',
     preparing: '准备影像',
-    submitted: '远程任务已提交',
-    polling: '轮询推理结果',
+    submitted: 'Latest Model 任务已提交',
+    polling: '轮询 Latest Model 结果',
+    paused: '已暂停',
+    pause_requested: '暂停请求中',
     completed: '已完成',
     failed: '已停止'
 };
@@ -1474,7 +1478,7 @@ async function loadTokens() {
 async function createToken() {
     const name = document.getElementById('token-name')?.value.trim();
     const description = document.getElementById('token-description')?.value.trim() || '';
-    const scopesRaw = document.getElementById('token-scopes')?.value.trim() || 'tasks.read,tasks.update';
+    const scopesRaw = document.getElementById('token-scopes')?.value.trim() || 'integration.read,integration.write';
     const scopes = scopesRaw.split(',').map(item => item.trim()).filter(Boolean);
 
     if (!name) {
@@ -1497,7 +1501,7 @@ async function createToken() {
             <div class="space-y-4 font-mono text-xs">
                 <div>令牌名称：<span class="font-bold">${escapeHtml(result.name)}</span></div>
                 <div>创建时间：<span class="font-bold">${formatDateTime(result.created_at)}</span></div>
-                <div class="border border-red-200 bg-red-50 p-3 leading-6">完整令牌仅显示这一次，请立即保存到你的 Worker 配置中。</div>
+                <div class="border border-red-200 bg-red-50 p-3 leading-6">完整令牌仅显示这一次，请立即保存到你的集成脚本或外部测试工具配置中。</div>
                 <pre class="whitespace-pre-wrap break-all bg-gray-50 border border-gray-200 p-3 rounded-sm">${escapeHtml(result.token)}</pre>
             </div>
         `);
@@ -2161,13 +2165,91 @@ function renderWorkflowLabPanel() {
                     <div class="text-gray-300 font-normal mt-1">用指定日期跑完整日报生成</div>
                 </button>
             </div>
+            <div id="wf-lab-summary" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3"></div>
             <pre id="wf-lab-output" class="bg-gray-50 border border-gray-200 p-4 font-mono text-[10px] overflow-x-auto whitespace-pre-wrap min-h-[160px]">点击上方按钮开始测试...</pre>
         </div>`;
+}
+
+function renderWorkflowLabCards(data, isError = false) {
+    const el = document.getElementById('wf-lab-summary');
+    if (!el) return;
+    if (isError || !data || typeof data !== 'object') {
+        el.innerHTML = '';
+        return;
+    }
+
+    const snapshot = data?.event ? data : data?.snapshot || null;
+    const cards = [];
+
+    if (snapshot?.latest_model) {
+        const latestModel = snapshot.latest_model;
+        cards.push(`
+            <div class="border ${latestModel.configured ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'} p-3 space-y-1">
+                <div class="font-mono text-[10px] font-bold uppercase">Latest Model</div>
+                <div class="font-mono text-[10px] text-gray-700">配置: <span class="font-bold">${latestModel.configured ? '已配置' : '未配置'}</span></div>
+                <div class="font-mono text-[10px] text-gray-600 break-all">Endpoint: ${escapeHtml(latestModel.endpoint || '未设置')}</div>
+                <div class="font-mono text-[10px] text-gray-500">Poll: ${latestModel.poll_interval_seconds || 0}s × ${latestModel.max_polls || 0}</div>
+            </div>
+        `);
+    }
+
+    if (snapshot?.event) {
+        const event = snapshot.event;
+        cards.push(`
+            <div class="border border-gray-200 bg-white p-3 space-y-1">
+                <div class="font-mono text-[10px] font-bold uppercase">事件快照</div>
+                <div class="font-mono text-[10px] text-gray-700">状态: <span class="font-bold">${escapeHtml(labelStatus(event.status || 'unknown'))}</span></div>
+                <div class="font-mono text-[10px] text-gray-600">影像: pre ${event.has_pre_image ? '✓' : '×'} / post ${event.has_post_image ? '✓' : '×'}</div>
+                <div class="font-mono text-[10px] text-gray-600">质检: ${event.quality_checked ? (event.quality_pass ? '通过' : '未通过') : '未执行'}${event.quality_score != null ? ` · ${event.quality_score}` : ''}</div>
+            </div>
+        `);
+    }
+
+    if (snapshot?.task) {
+        const task = snapshot.task;
+        cards.push(`
+            <div class="border border-gray-200 bg-white p-3 space-y-1">
+                <div class="font-mono text-[10px] font-bold uppercase">推理任务</div>
+                <div class="font-mono text-[10px] text-gray-700">状态: <span class="font-bold">${escapeHtml(labelTaskStatus(task.task_status || 'pending'))}</span></div>
+                <div class="font-mono text-[10px] text-gray-600">阶段: ${escapeHtml(labelTaskStage(task.progress_stage || 'queued'))}</div>
+                <div class="font-mono text-[10px] text-gray-600">进度: ${task.progress_percent || 0}% · ${task.completed_task_count || 0}/${task.task_count || 0}</div>
+                <div class="font-mono text-[10px] text-gray-500">影像: ${escapeHtml(task.task_data?.selected_image_type || task.task_data?.image_kind || '未指定')}</div>
+                ${task.failure_reason ? `<div class="font-mono text-[10px] text-red-600">原因: ${escapeHtml(task.failure_reason)}</div>` : ''}
+            </div>
+        `);
+    }
+
+    if (snapshot?.product) {
+        const product = snapshot.product;
+        cards.push(`
+            <div class="border border-gray-200 bg-white p-3 space-y-1">
+                <div class="font-mono text-[10px] font-bold uppercase">成品</div>
+                <div class="font-mono text-[10px] text-gray-700">存在: <span class="font-bold">${product.exists ? '是' : '否'}</span></div>
+                <div class="font-mono text-[10px] text-gray-600">摘要: ${product.summary_generated ? '已生成' : '未生成'}</div>
+                <div class="font-mono text-[10px] text-gray-500 leading-5">${escapeHtml(product.summary_preview || '暂无摘要预览')}</div>
+            </div>
+        `);
+    }
+
+    if (data?.report) {
+        cards.push(`
+            <div class="border border-gray-200 bg-white p-3 space-y-1">
+                <div class="font-mono text-[10px] font-bold uppercase">日报结果</div>
+                <div class="font-mono text-[10px] text-gray-700">日期: <span class="font-bold">${escapeHtml(data.report.date || '未知')}</span></div>
+                <div class="font-mono text-[10px] text-gray-600">事件数: ${data.report.event_count ?? 0}</div>
+                <div class="font-mono text-[10px] text-gray-600">发布: ${data.report.published ? '已发布' : '未发布'}</div>
+                <div class="font-mono text-[10px] text-gray-500">${escapeHtml(data.report.title || '无标题')}</div>
+            </div>
+        `);
+    }
+
+    el.innerHTML = cards.join('');
 }
 
 function setWorkflowLabOutput(data, isError = false) {
     const el = document.getElementById('wf-lab-output');
     if (!el) return;
+    renderWorkflowLabCards(data, isError);
     el.textContent = typeof data === 'string' ? data : stringifyData(data);
     el.className = `bg-gray-50 border p-4 font-mono text-[10px] overflow-x-auto whitespace-pre-wrap min-h-[160px] ${isError ? 'border-red-200 text-red-600' : 'border-gray-200 text-gray-700'}`;
 }

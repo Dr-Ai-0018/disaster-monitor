@@ -117,8 +117,15 @@ def _workflow_lab_snapshot(db: Session, uuid: str) -> Dict[str, Any]:
     task = db.query(TaskQueue).filter(TaskQueue.uuid == uuid).first()
     product = db.query(Product).filter(Product.uuid == uuid).first()
     task_payload = _task_to_progress_payload(task, event, product) if task else None
+    latest_model_configured = bool(settings.LATEST_MODEL_ENDPOINT and settings.LATEST_MODEL_API_KEY)
 
     return {
+        "latest_model": {
+            "configured": latest_model_configured,
+            "endpoint": settings.LATEST_MODEL_ENDPOINT or None,
+            "poll_interval_seconds": settings.LATEST_MODEL_POLL_INTERVAL_SECONDS,
+            "max_polls": settings.LATEST_MODEL_MAX_POLLS,
+        },
         "event": {
             "uuid": event.uuid,
             "title": event.title,
@@ -138,6 +145,15 @@ def _workflow_lab_snapshot(db: Session, uuid: str) -> Dict[str, Any]:
         "task": task_payload,
         "product": {
             "exists": bool(product),
+            "selected_image_type": (
+                task_payload.get("task_data", {}).get("selected_image_type")
+                if task_payload else None
+            ),
+            "summary_preview": (
+                (product.summary[:240] + "...")
+                if product and product.summary and len(product.summary) > 240
+                else getattr(product, "summary", None)
+            ),
             "summary_generated": bool(product.summary_generated) if product else False,
             "updated_at": getattr(product, "updated_at", None),
         },
@@ -549,7 +565,13 @@ def resume_task_progress(
     now = _now_ms()
 
     if previous_status == "pause_requested":
-        lock_is_alive = bool(task.locked_by and task.locked_until and task.locked_until > now)
+        heartbeat_grace_ms = int((task.heartbeat_interval or 300) * 1000 * 2)
+        lock_is_alive = bool(
+            task.locked_by and (
+                (task.locked_until and task.locked_until > now) or
+                (task.heartbeat and task.heartbeat >= now - heartbeat_grace_ms)
+            )
+        )
 
         if lock_is_alive:
             task.status = "running"

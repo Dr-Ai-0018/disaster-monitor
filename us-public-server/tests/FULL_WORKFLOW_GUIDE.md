@@ -2,6 +2,8 @@
 
 本指南演示从 RSOE 数据抓取到最终报告生成的**端到端完整流程**。
 
+> 当前推理主链路为 `Latest Model Open API`，以下测试步骤全部围绕这条链路展开。
+
 ---
 
 ## 📋 完整流程概览
@@ -17,9 +19,9 @@ GEE 影像下载任务提交
     ↓
 OpenAI 质量评估
     ↓
-GPU 任务入队
+Latest Model 推理任务入队
     ↓
-GPU AI 推理（7 种分析任务）
+Latest Model Open API 推理（7 种分析任务）
     ↓
 Gemini 事件摘要生成
     ↓
@@ -79,19 +81,19 @@ E:/project/full/Scripts/python.exe tests/full_workflow_simulator.py
    云量: Low (< 10%)
    结论: Approved for AI analysis
 
-步骤 6: 创建 GPU 推理任务
-✅ GPU 任务创建成功
+步骤 6: 创建 Latest Model 推理任务
+✅ 推理任务创建成功
    任务数: 7 个 AI 分析任务
-   状态: queued (已入队，等待 GPU 处理)
+   状态: queued (已入队，等待 Latest Model API 处理)
 
-步骤 7: GPU 推理处理
-⚠️  此步骤需要运行 GPU 模拟器:
+步骤 7: Latest Model Open API 测试
+⚠️  此步骤需要运行 Latest Model Open API 测试器:
    E:/project/full/Scripts/python.exe tests/test_gpu_simulator.py
 ```
 
 ---
 
-### 步骤 3：运行 GPU 模拟器
+### 步骤 3：运行 Latest Model Open API 测试器
 
 **再开一个终端**，运行：
 
@@ -102,17 +104,18 @@ E:/project/full/Scripts/python.exe tests/test_gpu_simulator.py
 **预期输出**：
 
 ```
-✅ 拉取到 1 个任务
-🤖 模拟推理...
-✅ 结果提交成功
-📊 测试完成: 1/1 成功
+Endpoint: https://your-latest-model-api.example.com
+[1] 提交成功
+[2] 轮询状态...
+[3] 获取结果成功
+✅ Latest Model Open API 链路正常
 ```
 
 ---
 
 ### 步骤 4：恢复工作流（生成摘要和报告）
 
-GPU 推理完成后，回到步骤 2 的终端，运行：
+Latest Model Open API 测试完成后，回到步骤 2 的终端，运行：
 
 ```powershell
 E:/project/full/Scripts/python.exe tests/full_workflow_simulator.py --resume
@@ -183,8 +186,8 @@ E:/project/full/Scripts/python.exe -c "from models.models import DailyReport, ge
 - [ ] **步骤 3**：GEE 任务创建（2 个任务：灾前/灾后）
 - [ ] **步骤 4**：影像下载完成（2 个 .tif 文件）
 - [ ] **步骤 5**：质量评估通过（评分 0.85）
-- [ ] **步骤 6**：GPU 任务入队（7 个 AI 任务）
-- [ ] **步骤 7**：GPU 推理完成（模拟器返回成功）
+- [ ] **步骤 6**：Latest Model 推理任务入队（7 个 AI 任务）
+- [ ] **步骤 7**：Latest Model Open API 测试器返回成功
 - [ ] **步骤 8**：事件摘要生成（Gemini Flash）
 - [ ] **步骤 9**：每日报告生成（Gemini Pro）
 - [ ] **前端验证**：成品池中可见完整分析结果
@@ -199,7 +202,7 @@ E:/project/full/Scripts/python.exe -c "from models.models import DailyReport, ge
 |------|------|
 | `tests/full_workflow_simulator.py` | 完整工作流模拟（步骤 1-9） |
 | `tests/full_workflow_simulator.py --resume` | 恢复工作流（步骤 8-9） |
-| `tests/test_gpu_simulator.py` | GPU Worker 模拟器 |
+| `tests/test_gpu_simulator.py` | Latest Model Open API 测试器 |
 | `tests/check_db.py` | 检查数据库状态 |
 | `tests/clean_db.py` | 清理测试数据 |
 
@@ -237,7 +240,7 @@ E:/project/full/Scripts/python.exe -c "from models.models import DailyReport, ge
 - 评估内容：云量、影像质量、时间相关性、空间覆盖
 - 事件状态：`ready` → `checked`
 
-### 6. GPU 任务入队（自动）
+### 6. Latest Model 推理任务入队（自动）
 
 - 创建 7 个 AI 分析任务：
   1. IMG_CAP - 影像描述
@@ -249,9 +252,9 @@ E:/project/full/Scripts/python.exe -c "from models.models import DailyReport, ge
   7. REG_VG - 视觉定位
 - 事件状态：`checked` → `queued`
 
-### 7. GPU 推理（需手动运行模拟器）
+### 7. Latest Model Open API 推理（需手动运行测试器）
 
-- GPU Worker 拉取任务
+- Latest Model Open API 接收任务
 - 执行 7 个 AI 分析任务
 - 提交推理结果到成品池
 - 事件状态：`queued` → `processing` → `completed`
@@ -275,7 +278,7 @@ E:/project/full/Scripts/python.exe -c "from models.models import DailyReport, ge
 
 ### Q1: 工作流在步骤 7 暂停了？
 
-**原因**：步骤 7 需要手动运行 GPU 模拟器。
+**原因**：步骤 7 需要手动运行 Latest Model Open API 测试器。
 
 **解决**：
 ```powershell

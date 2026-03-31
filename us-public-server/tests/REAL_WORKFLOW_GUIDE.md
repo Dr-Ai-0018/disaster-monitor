@@ -1,6 +1,8 @@
 # 🌍 真实完整工作流测试指南
 
-本指南演示**真实调用所有 API**（RSOE、GEE、OpenAI、Gemini），只有 GPU 模型推理部分使用模拟。
+> 当前推理主链路为 `Latest Model Open API`，以下测试步骤全部围绕这条链路展开。
+
+本指南演示**真实调用所有 API**（RSOE、GEE、OpenAI、Gemini），推理阶段通过 `Latest Model Open API` 直连完成。
 
 ---
 
@@ -15,9 +17,9 @@
     ↓ 下载真实遥感影像（Sentinel-2/Landsat）
 ✅ OpenAI API 真实调用
     ↓ GPT-4 Vision 质量评估
-GPU 任务入队
+Latest Model 推理任务入队
     ↓
-🔧 GPU 推理模拟（唯一模拟部分）
+🔧 Latest Model Open API 测试（唯一模拟部分）
     ↓ 7 种 AI 分析任务
 ✅ Gemini Flash 真实调用
     ↓ 生成事件分析摘要
@@ -156,20 +158,20 @@ E:/project/full/Scripts/python.exe tests/real_workflow_test.py
    清晰度: clear
    建议: Approved for AI analysis
 
-步骤 6: 创建 GPU 推理任务
-✅ GPU 任务创建成功:
+步骤 6: 创建 Latest Model 推理任务
+✅ 推理任务创建成功:
    UUID: xxx-xxx-xxx
    优先级: 120
    状态: pending
 
-步骤 7: GPU 推理处理
-⚠️  此步骤需要运行 GPU 模拟器:
+步骤 7: Latest Model Open API 推理处理
+⚠️  此步骤需要运行 Latest Model Open API 测试器:
    E:/project/full/Scripts/python.exe tests/test_gpu_simulator.py
 ```
 
 ---
 
-### 步骤 3：运行 GPU 模拟器
+### 步骤 3：运行 Latest Model Open API 测试器
 
 **再开一个终端**：
 
@@ -180,10 +182,11 @@ E:/project/full/Scripts/python.exe tests/test_gpu_simulator.py
 **预期输出**：
 
 ```
-✅ 拉取到 1 个任务
-🤖 模拟推理...
-✅ 结果提交成功
-📊 测试完成: 1/1 成功
+Endpoint: https://your-latest-model-api.example.com
+[1] 提交成功
+[2] 轮询状态...
+[3] 获取结果成功
+✅ Latest Model Open API 链路正常
 ```
 
 ---
@@ -258,8 +261,8 @@ E:/project/full/Scripts/python.exe -c "from models.models import Event, get_sess
 - [ ] **步骤 3**：GEE 任务提交成功（返回 GEE Task ID）
 - [ ] **步骤 4**：影像下载完成（生成真实 .tif 文件）
 - [ ] **步骤 5**：OpenAI 质量评估成功（返回评分和建议）
-- [ ] **步骤 6**：GPU 任务入队成功
-- [ ] **步骤 7**：GPU 模拟器完成推理
+- [ ] **步骤 6**：Latest Model 推理任务入队成功
+- [ ] **步骤 7**：Latest Model Open API 测试器完成推理
 - [ ] **步骤 8**：Gemini 生成事件摘要（真实 API 调用）
 - [ ] **步骤 9**：Gemini 生成每日报告（真实 API 调用）
 - [ ] **前端验证**：所有数据在前端可见
@@ -274,7 +277,7 @@ E:/project/full/Scripts/python.exe -c "from models.models import Event, get_sess
 |------|------|
 | `tests/real_workflow_test.py` | 真实完整工作流（步骤 1-9） |
 | `tests/real_workflow_test.py --resume <UUID>` | 恢复工作流（步骤 8-9） |
-| `tests/test_gpu_simulator.py` | GPU Worker 模拟器 |
+| `tests/test_gpu_simulator.py` | Latest Model Open API 测试器 |
 | `tests/check_db.py` | 检查数据库状态 |
 | `tests/clean_db.py` | 清理测试数据 |
 

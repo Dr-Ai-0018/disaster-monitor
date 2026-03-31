@@ -1,5 +1,7 @@
 # 本地测试指南
 
+本指南以 `Latest Model Open API` 为正式推理主链路。
+
 ## 📋 测试前准备
 
 ### 1. 启动公网服务器（端口 2335）
@@ -18,12 +20,6 @@ python database/create_admin.py
 # 输入用户名: admin
 # 输入密码: admin123
 
-# 创建 GPU Server API Token（首次运行）
-python database/create_token.py
-# 输入名称: test-gpu-server
-# 输入描述: 本地测试用 GPU Server
-# 复制输出的 Token，例如: test-token-abc123xyz...
-
 # 启动服务器（监听 2335 端口）
 python main.py
 ```
@@ -40,13 +36,13 @@ python main.py
 ### 步骤 1: 创建测试任务
 
 ```bash
-# 创建一个已入队的测试任务（可直接被 GPU 拉取）
+# 创建一个已入队的测试任务（可直接被 Latest Model API 链路消费）
 python tests/create_test_event.py --ready
 ```
 
 输出示例：
 ```
-✅ 可拉取测试任务创建成功:
+✅ 测试任务创建成功:
    UUID: 12345678-abcd-...
    Event ID: 999997
    标题: [TEST] Earthquake Damage Assessment - Ready for AI
@@ -54,14 +50,7 @@ python tests/create_test_event.py --ready
    优先级: 80
 ```
 
-### 步骤 2: 运行 GPU 模拟器
-
-**重要：先修改模拟器中的 API_TOKEN**
-
-编辑 `tests/test_gpu_simulator.py` 第 12 行：
-```python
-API_TOKEN = "你刚才创建的真实 Token"  # 替换这里
-```
+### 步骤 2: 运行 Latest Model Open API 测试器
 
 然后运行：
 ```bash
@@ -157,10 +146,9 @@ event.updated_at = now_ms
 
 # 创建任务队列
 task_data = {
-    'event_id': event.event_id,
-    'event_title': event.title,
-    'pre_image_url': event.pre_image_path,
-    'post_image_url': event.post_image_path,
+    'uuid': event.uuid,
+    'image_path': event.post_image_path or event.pre_image_path,
+    'image_kind': 'post_disaster' if event.post_image_path else 'pre_disaster',
     'tasks': [
         {'task_id': 1, 'type': 'IMG_CAP', 'prompt': 'Describe this disaster.'},
         {'task_id': 2, 'type': 'IMG_VQA', 'prompt': 'Is there damage?'},
@@ -169,12 +157,22 @@ task_data = {
         {'task_id': 5, 'type': 'PIX_CHG', 'prompt': 'Detect changes.'},
         {'task_id': 6, 'type': 'REG_DET_HBB', 'prompt': 'Detect objects.'},
         {'task_id': 7, 'type': 'REG_VG', 'prompt': 'Locate damage.'},
-    ]
+    ],
+    'event_details': {
+        'title': event.title,
+        'category': event.category,
+        'category_name': event.category_name,
+        'country': event.country,
+        'severity': event.severity,
+        'longitude': event.longitude,
+        'latitude': event.latitude,
+        'event_date': event.event_date,
+        'details': {}
+    }
 }
 
 task = TaskQueue(
     uuid=event.uuid,
-    event_id=event.event_id,
     priority=70,
     status='pending',
     task_data=json.dumps(task_data),
@@ -190,7 +188,7 @@ db.close()
 "
 ```
 
-### 步骤 4: 运行 GPU 模拟器
+### 步骤 4: 运行 Latest Model Open API 测试器
 
 ```bash
 python tests/test_gpu_simulator.py
@@ -200,21 +198,19 @@ python tests/test_gpu_simulator.py
 
 ## 🔍 常见问题排查
 
-### 1. GPU 模拟器报 401 Unauthorized
+### 1. Latest Model Open API 测试器报配置错误
 
-**原因**: API Token 不正确
+**原因**: `LATEST_MODEL_ENDPOINT` 或 `LATEST_MODEL_API_KEY` 未配置
 
 **解决**:
 ```bash
-# 重新生成 Token
-python database/create_token.py
-
-# 复制新 Token 并更新 tests/test_gpu_simulator.py 第 12 行
+# 检查 .env
+grep LATEST_MODEL .env
 ```
 
-### 2. 拉取任务返回空列表
+### 2. 推理任务未被消费
 
-**原因**: 数据库中没有 `status=pending` 的任务
+**原因**: 数据库中没有 `status=pending` 的任务，或 `Latest Model Open API` 未配置
 
 **解决**:
 ```bash
@@ -244,7 +240,7 @@ ls database/disaster.db
 python database/init_db.py
 ```
 
-### 4. 模拟器提交结果失败
+### 4. 测试器调用远端 API 失败
 
 **查看服务器日志**:
 ```bash
@@ -313,7 +309,7 @@ python main.py
 # 2. 创建测试任务（新终端）
 python tests/create_test_event.py --ready
 
-# 3. 运行 GPU 模拟器（确保已修改 API_TOKEN）
+# 3. 运行 Latest Model Open API 测试器
 python tests/test_gpu_simulator.py
 
 # 4. 查看结果
@@ -359,12 +355,11 @@ python tests/test_gpu_simulator.py
 
 - [ ] 服务器成功启动在 2335 端口
 - [ ] 管理后台可以访问并登录
-- [ ] API Token 创建成功
 - [ ] 测试事件创建成功
-- [ ] GPU 模拟器连接成功
-- [ ] 任务拉取成功
-- [ ] 心跳更新正常
-- [ ] 推理结果提交成功
+- [ ] Latest Model Open API 测试器运行成功
+- [ ] 远端任务提交成功
+- [ ] 轮询状态正常
+- [ ] 推理结果回写成功
 - [ ] 成品池中可以看到结果
 - [ ] 事件状态正确更新为 `completed`
 

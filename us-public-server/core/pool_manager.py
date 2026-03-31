@@ -4,6 +4,7 @@
 """
 import uuid
 import json
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
@@ -60,6 +61,68 @@ class PoolManager:
         self.qa = QualityAssessor()
         self.task_cfg = settings.TASK_QUEUE_CONFIG
         self.latest_model = LatestModelClient()
+
+    def _mark_task_waiting_for_config(self, task: TaskQueue, event: Optional[Event], reason: str) -> None:
+        now = _now_ms()
+        task.status = "failed"
+        task.failure_reason = reason
+        task.last_error_details = reason
+        task.progress_stage = "failed"
+        task.progress_message = reason
+        task.progress_percent = min(task.progress_percent or 0, 99)
+        task.locked_by = None
+        task.locked_at = None
+        task.locked_until = None
+        task.heartbeat = None
+        task.updated_at = now
+        if event:
+            event.status = "failed"
+            event.updated_at = now
+
+    def _mark_task_paused(self, task: TaskQueue, event: Optional[Event], message: str) -> None:
+        now = _now_ms()
+        task.status = "paused"
+        task.pause_requested = 0
+        task.paused_at = now
+        task.locked_by = None
+        task.locked_at = None
+        task.locked_until = None
+        task.heartbeat = None
+        task.progress_stage = "paused"
+        task.progress_message = message
+        task.updated_at = now
+        if event:
+            event.status = "queued"
+            event.updated_at = now
+
+    def _wait_for_latest_model_result(self, task: TaskQueue, event: Optional[Event], job_id: str) -> Dict[str, Any]:
+        last_payload: Dict[str, Any] = {}
+        for _ in range(self.latest_model.max_polls):
+            time.sleep(self.latest_model.poll_interval)
+            self.db.refresh(task)
+            if event:
+                self.db.refresh(event)
+
+            if bool(task.pause_requested):
+                self._mark_task_paused(task, event, f"已暂停轮询，远程任务 job_id={job_id}")
+                self.db.commit()
+                raise RuntimeError(f"TASK_PAUSED:{job_id}")
+
+            task.heartbeat = _now_ms()
+            task.updated_at = task.heartbeat
+            self.db.commit()
+
+            last_payload = self.latest_model.get_job_status(job_id)
+            status = str(last_payload.get("status") or "").lower()
+            if status == "succeeded":
+                return self.latest_model.get_job_result(job_id)
+            if status == "failed":
+                return last_payload
+
+        raise TimeoutError(
+            f"Latest Model 任务轮询超时: job_id={job_id}, "
+            f"last={json.dumps(last_payload, ensure_ascii=False)[:300]}"
+        )
 
     # ── 1. pending → pool（获取事件详情 + 坐标） ─────────────
 
@@ -564,7 +627,26 @@ class PoolManager:
     def process_pending_inference_tasks(self, limit: int = 3, target_uuid: Optional[str] = None) -> int:
         """内部轮询执行待处理推理任务，并写入成品池。"""
         if not self.latest_model.is_configured():
-            logger.warning("Latest Model Open API 未配置，跳过推理任务")
+            logger.warning("Latest Model Open API 未配置，待处理任务将被标记为失败")
+            query = self.db.query(TaskQueue).filter(TaskQueue.status == "pending")
+            if target_uuid:
+                query = query.filter(TaskQueue.uuid == target_uuid)
+
+            tasks = (
+                query
+                .order_by(TaskQueue.priority.desc(), TaskQueue.created_at.asc())
+                .limit(limit)
+                .all()
+            )
+
+            if not tasks:
+                return 0
+
+            reason = "Latest Model Open API 未配置，无法执行推理任务"
+            for task in tasks:
+                event = self.db.query(Event).filter(Event.uuid == task.uuid).first()
+                self._mark_task_waiting_for_config(task, event, reason)
+            self.db.commit()
             return 0
 
         query = self.db.query(TaskQueue).filter(TaskQueue.status == "pending")
@@ -703,7 +785,7 @@ class PoolManager:
                 task.heartbeat = _now_ms()
                 self.db.commit()
 
-                result_payload = self.latest_model.wait_for_result(job_id)
+                result_payload = self._wait_for_latest_model_result(task, event, job_id)
                 result_status = str(result_payload.get("status") or "").lower()
                 if result_status == "failed":
                     raise RuntimeError(
@@ -771,6 +853,9 @@ class PoolManager:
                     f"[{task.uuid[:8]}] Latest Model 推理完成，成品已{'更新' if not created else '创建'}"
                 )
             except Exception as e:
+                if str(e).startswith("TASK_PAUSED:"):
+                    logger.info(f"[{task.uuid[:8]}] Latest Model 轮询已暂停")
+                    continue
                 now = _now_ms()
                 current_retry = task.retry_count or 0
                 max_retries = task.max_retries or self.task_cfg.get("max_retries", 3)

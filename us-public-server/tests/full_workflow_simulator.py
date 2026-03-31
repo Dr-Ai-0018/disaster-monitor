@@ -300,21 +300,21 @@ class FullWorkflowSimulator:
         self.db.add(task)
         self.db.commit()
         
-        print(f"✅ GPU 任务创建成功:")
+        print(f"✅ Latest Model 推理任务创建成功:")
         print(f"   UUID: {task.uuid}")
         print(f"   优先级: {task.priority}")
         print(f"   任务数: 7 个 AI 分析任务")
-        print(f"   状态: {event.status} (已入队，等待 GPU 处理)")
+        print(f"   状态: {event.status} (已入队，等待 Latest Model Open API 处理)")
         
         return task
     
     def step7_gpu_inference(self, event: Event, task: TaskQueue):
-        """步骤 7: 模拟 GPU 推理（由 GPU Worker 完成）"""
+        """步骤 7: 模拟 Latest Model Open API 推理"""
         print("\n" + "=" * 70)
-        print("步骤 7: GPU 推理处理")
+        print("步骤 7: Latest Model Open API 推理处理")
         print("=" * 70)
         
-        print("⚠️  此步骤需要运行 GPU 模拟器:")
+        print("⚠️  此步骤需要运行 Latest Model Open API 测试器:")
         print("   E:/project/full/Scripts/python.exe tests/test_gpu_simulator.py")
         print("\n   或者手动模拟推理结果...")
         
@@ -327,7 +327,7 @@ class FullWorkflowSimulator:
             print(f"   任务数: {len(result)} 个")
             return product
         else:
-            print("⏳ 等待 GPU Worker 处理...")
+            print("⏳ 等待 Latest Model Open API 返回结果...")
             return None
     
     def step8_generate_summary(self, event: Event):
@@ -492,7 +492,7 @@ class FullWorkflowSimulator:
             task = self.step6_enqueue_task(event)
             time.sleep(1)
             
-            # 步骤 7: 需要手动运行 GPU 模拟器
+            # 步骤 7: 需要手动运行 Latest Model Open API 测试器
             product = self.step7_gpu_inference(event, task)
             
             if product:
@@ -520,7 +520,7 @@ class FullWorkflowSimulator:
                 print("⏸️  工作流暂停")
                 print("=" * 70)
                 print(f"\n下一步操作:")
-                print(f"   1. 运行 GPU 模拟器:")
+                print(f"   1. 运行 Latest Model Open API 测试器:")
                 print(f"      E:/project/full/Scripts/python.exe tests/test_gpu_simulator.py")
                 print(f"\n   2. 再次运行本脚本完成后续步骤:")
                 print(f"      E:/project/full/Scripts/python.exe tests/full_workflow_simulator.py --resume")

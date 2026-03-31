@@ -229,7 +229,8 @@ def get_satellite_image(
             headers={"Cache-Control": "public, max-age=86400"},
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"影像转换失败: {e}")
+        logger.exception(f"影像转换失败 uuid={uuid} image_type={image_type} path={path}: {e}")
+        raise HTTPException(status_code=500, detail="影像转换失败")
 
 
 @router.get("/image/{uuid}/{image_type}/enhanced")
@@ -262,13 +263,13 @@ def get_satellite_image_enhanced(
         import numpy as np
     except Exception as e:
         logger.exception(f"增强影像依赖加载失败（numpy） uuid={uuid} image_type={image_type}: {e}")
-        raise HTTPException(status_code=501, detail=f"增强依赖加载失败: numpy ({e})")
+        raise HTTPException(status_code=501, detail="增强影像依赖加载失败")
 
     try:
         from PIL import Image
     except Exception as e:
         logger.exception(f"增强影像依赖加载失败（Pillow） uuid={uuid} image_type={image_type}: {e}")
-        raise HTTPException(status_code=501, detail=f"增强依赖加载失败: Pillow ({e})")
+        raise HTTPException(status_code=501, detail="增强影像依赖加载失败")
 
     try:
         with Image.open(path) as img:
@@ -295,4 +296,4 @@ def get_satellite_image_enhanced(
         )
     except Exception as e:
         logger.exception(f"增强影像处理失败 uuid={uuid} image_type={image_type} path={path}: {e}")
-        raise HTTPException(status_code=500, detail=f"影像增强失败: {e}")
+        raise HTTPException(status_code=500, detail="影像增强失败")

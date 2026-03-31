@@ -354,14 +354,14 @@ class RealWorkflowTest:
         return task
     
     def step7_gpu_inference(self, event: Event):
-        """步骤 7: GPU 推理（需手动运行模拟器）"""
+        """步骤 7: Latest Model Open API 推理（需手动运行测试器）"""
         print("\n" + "=" * 70)
-        print("步骤 7: GPU 推理处理")
+        print("步骤 7: Latest Model Open API 推理处理")
         print("=" * 70)
         
-        print("⚠️  此步骤需要运行 GPU 模拟器:")
+        print("⚠️  此步骤需要运行 Latest Model Open API 测试器:")
         print("   E:/project/full/Scripts/python.exe tests/test_gpu_simulator.py")
-        print("\n   GPU 模拟器会拉取任务并提交模拟推理结果")
+        print("\n   测试器会直接调用 Latest Model Open API 并返回模拟/真实结果")
         
         # 检查是否已有推理结果
         product = self.db.query(Product).filter(Product.uuid == event.uuid).first()
@@ -369,7 +369,7 @@ class RealWorkflowTest:
             print(f"✅ 推理结果已存在")
             return product
         else:
-            print("⏳ 等待 GPU Worker 处理...")
+            print("⏳ 等待 Latest Model Open API 返回结果...")
             return None
     
     def step8_generate_summary(self, event: Event):
@@ -519,7 +519,7 @@ class RealWorkflowTest:
                 print("⏸️  工作流暂停")
                 print("=" * 70)
                 print(f"\n下一步操作:")
-                print(f"   1. 运行 GPU 模拟器:")
+                print(f"   1. 运行 Latest Model Open API 测试器:")
                 print(f"      E:/project/full/Scripts/python.exe tests/test_gpu_simulator.py")
                 print(f"\n   2. 再次运行本脚本完成后续步骤:")
                 print(f"      E:/project/full/Scripts/python.exe tests/real_workflow_test.py --resume {event.uuid}")

@@ -111,7 +111,7 @@ class ProcessEventRequest(BaseModel):
 
 
 # ──────────────────────────────────────────
-# Task Queue (GPU Server)
+# Legacy Task Queue Compatibility (Deprecated)
 # ──────────────────────────────────────────
 
 class TaskData(BaseModel):
@@ -348,7 +348,7 @@ class SystemStatusResponse(BaseModel):
 class CreateTokenRequest(BaseModel):
     name: str
     description: Optional[str] = ""
-    scopes: List[str] = ["tasks.read", "tasks.update"]
+    scopes: List[str] = ["integration.read", "integration.write"]
 
 
 class CreateTokenResponse(BaseModel):
