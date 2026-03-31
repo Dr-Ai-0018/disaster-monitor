@@ -106,17 +106,6 @@ pending
   - 日报生成
   - 状态快照
 
-另外也保留了命令行分阶段测试器：
-
-```bash
-cd us-public-server
-python tests/workflow_stage_tester.py inspect --uuid <UUID>
-python tests/workflow_stage_tester.py quality --uuid <UUID>
-python tests/workflow_stage_tester.py inference --uuid <UUID>
-python tests/workflow_stage_tester.py summary --uuid <UUID>
-python tests/workflow_stage_tester.py report --date 2026-03-31
-```
-
 ---
 
 ## 快速开始
