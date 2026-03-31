@@ -314,6 +314,27 @@ class GenerateReportResponse(BaseModel):
 
 
 # ──────────────────────────────────────────
+# Workflow Lab
+# ──────────────────────────────────────────
+
+class WorkflowLabQualityRequest(BaseModel):
+    persist: bool = True
+
+
+class WorkflowLabSummaryRequest(BaseModel):
+    persist: bool = True
+
+
+class WorkflowLabInferenceRequest(BaseModel):
+    image_type: Optional[str] = Field(default=None, pattern="^(pre|post)?$")
+    reset_task: bool = True
+
+
+class WorkflowLabReportRequest(BaseModel):
+    date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
+# ──────────────────────────────────────────
 # Admin
 # ──────────────────────────────────────────
 

@@ -1904,6 +1904,7 @@ let _workflowEvent = null;
 let _workflowImageType = null;
 let _workflowTaskUuid = null;
 let _workflowPollTimer = null;
+let _workflowLabDate = null;
 
 const WORKFLOW_STEP_LABELS = ['选择事件', '选择影像', '触发推理', '查看结果'];
 
@@ -1912,6 +1913,7 @@ function initWorkflow() {
     _workflowEvent = null;
     _workflowImageType = null;
     _workflowTaskUuid = null;
+    _workflowLabDate = null;
     _clearWorkflowPoll();
     goToStep(1);
 }
@@ -2113,6 +2115,115 @@ function _wfConfirmImage(type) {
     goToStep(3);
 }
 
+function _getWorkflowLabDate() {
+    if (_workflowLabDate) return _workflowLabDate;
+    const topbarDate = document.getElementById('topbar-date')?.textContent?.trim();
+    if (topbarDate && /^\d{4}-\d{2}-\d{2}$/.test(topbarDate)) {
+        _workflowLabDate = topbarDate;
+        return _workflowLabDate;
+    }
+    const now = new Date();
+    _workflowLabDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    return _workflowLabDate;
+}
+
+function renderWorkflowLabPanel() {
+    if (!_workflowEvent) return '';
+    const reportDate = _getWorkflowLabDate();
+    return `
+        <div class="tech-card p-5 space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <div class="font-mono text-xs font-bold tracking-widest uppercase">Workflow Lab</div>
+                    <div class="font-mono text-[10px] text-gray-500 mt-1">单独测试 AI 质检、指定影像推理、单事件摘要、日报生成</div>
+                </div>
+                <button onclick="window.workflowLabAction('snapshot')" class="px-3 py-2 border border-gray-300 hover:border-black font-mono text-[10px] font-bold uppercase transition-colors">刷新快照</button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+                <button onclick="window.workflowLabAction('quality')" class="px-3 py-3 border border-gray-300 hover:border-black font-mono text-[10px] font-bold uppercase text-left transition-colors">
+                    <div>AI 质检</div>
+                    <div class="text-gray-500 font-normal mt-1">运行 pre/post 质检并写回事件</div>
+                </button>
+                <button onclick="window.workflowLabAction('inference')" class="px-3 py-3 border border-gray-300 hover:border-black font-mono text-[10px] font-bold uppercase text-left transition-colors">
+                    <div>指定影像推理</div>
+                    <div class="text-gray-500 font-normal mt-1">按当前选择影像重排队并立即消费</div>
+                </button>
+                <button onclick="window.workflowLabAction('summary')" class="px-3 py-3 border border-gray-300 hover:border-black font-mono text-[10px] font-bold uppercase text-left transition-colors">
+                    <div>单事件摘要</div>
+                    <div class="text-gray-500 font-normal mt-1">调用 AI 生成当前成品摘要</div>
+                </button>
+                <div class="border border-gray-300 p-3 space-y-2">
+                    <div class="font-mono text-[10px] font-bold uppercase">日报日期</div>
+                    <input id="wf-lab-report-date" type="date" value="${reportDate}" class="w-full border border-gray-200 px-2 py-2 font-mono text-[10px]">
+                </div>
+                <button onclick="window.workflowLabAction('report')" class="px-3 py-3 bg-black text-white font-mono text-[10px] font-bold uppercase text-left hover:bg-gray-800 transition-colors">
+                    <div>生成日报</div>
+                    <div class="text-gray-300 font-normal mt-1">用指定日期跑完整日报生成</div>
+                </button>
+            </div>
+            <pre id="wf-lab-output" class="bg-gray-50 border border-gray-200 p-4 font-mono text-[10px] overflow-x-auto whitespace-pre-wrap min-h-[160px]">点击上方按钮开始测试...</pre>
+        </div>`;
+}
+
+function setWorkflowLabOutput(data, isError = false) {
+    const el = document.getElementById('wf-lab-output');
+    if (!el) return;
+    el.textContent = typeof data === 'string' ? data : stringifyData(data);
+    el.className = `bg-gray-50 border p-4 font-mono text-[10px] overflow-x-auto whitespace-pre-wrap min-h-[160px] ${isError ? 'border-red-200 text-red-600' : 'border-gray-200 text-gray-700'}`;
+}
+
+async function workflowLabAction(action) {
+    if (!_workflowEvent) return;
+    const uuid = _workflowEvent.uuid;
+    const reportDateInput = document.getElementById('wf-lab-report-date');
+    if (reportDateInput?.value) _workflowLabDate = reportDateInput.value;
+    setWorkflowLabOutput('测试执行中，请稍候...');
+
+    try {
+        let resp;
+        if (action === 'snapshot') {
+            resp = await authFetch(`${ADMIN_API}/workflow-lab/events/${uuid}`);
+        } else if (action === 'quality') {
+            resp = await authFetch(`${ADMIN_API}/workflow-lab/events/${uuid}/quality`, {
+                method: 'POST',
+                body: JSON.stringify({ persist: true }),
+            });
+        } else if (action === 'inference') {
+            resp = await authFetch(`${ADMIN_API}/workflow-lab/events/${uuid}/inference`, {
+                method: 'POST',
+                body: JSON.stringify({ image_type: _workflowImageType || null, reset_task: true }),
+            });
+        } else if (action === 'summary') {
+            resp = await authFetch(`${ADMIN_API}/workflow-lab/events/${uuid}/summary`, {
+                method: 'POST',
+                body: JSON.stringify({ persist: true }),
+            });
+        } else if (action === 'report') {
+            resp = await authFetch(`${ADMIN_API}/workflow-lab/reports/generate`, {
+                method: 'POST',
+                body: JSON.stringify({ date: _workflowLabDate || _getWorkflowLabDate() }),
+            });
+        } else {
+            throw new Error(`UNKNOWN_ACTION:${action}`);
+        }
+
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.detail || resp.statusText);
+
+        setWorkflowLabOutput(data);
+        showToast('测试执行成功', 'success');
+
+        if (action === 'inference') {
+            _workflowTaskUuid = uuid;
+            document.getElementById('wf-progress-area')?.classList.remove('hidden');
+            _startWorkflowPoll();
+        }
+    } catch (e) {
+        setWorkflowLabOutput(`测试失败: ${e.message}`, true);
+        showToast(`测试失败: ${e.message}`, 'error');
+    }
+}
+
 // ── Step 3: 触发推理 ──────────────────────────────────
 
 function renderStep3() {
@@ -2140,6 +2251,7 @@ function renderStep3() {
                 </div>
                 <div id="wf-progress-msg" class="font-mono text-[10px] text-gray-500"></div>
             </div>
+            ${renderWorkflowLabPanel()}
         </div>`;
 }
 
@@ -2244,6 +2356,7 @@ async function renderStep4() {
                     <div class="font-mono text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-3">任务详情</div>
                     <pre class="bg-gray-50 border border-gray-200 p-4 font-mono text-[10px] overflow-x-auto whitespace-pre-wrap">${escapeHtml(stringifyData(task.step_details))}</pre>
                 </div>` : ''}
+                ${renderWorkflowLabPanel()}
             </div>`;
     } catch (e) {
         el.innerHTML = `<div class="tech-card p-6 font-mono text-xs text-red-500">加载结果失败: ${escapeHtml(e.message)}</div>`;
@@ -2300,6 +2413,7 @@ window._wfLoadEvents = _wfLoadEvents;
 window._wfSelectEvent = _wfSelectEvent;
 window._wfConfirmImage = _wfConfirmImage;
 window._wfTriggerInference = _wfTriggerInference;
+window.workflowLabAction = workflowLabAction;
 window.loadPool = loadPool;
 window.loadRawPool = loadRawPool;
 window.loadTrack = loadTrack;

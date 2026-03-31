@@ -19,6 +19,8 @@ from schemas.schemas import (
     TokenListItem, MessageResponse,
     TaskProgressSummary, TaskProgressDetail,
     TaskProgressListResponse, TaskProgressStatsResponse,
+    WorkflowLabQualityRequest, WorkflowLabSummaryRequest,
+    WorkflowLabInferenceRequest, WorkflowLabReportRequest,
 )
 from utils.auth import get_current_admin
 from utils.task_progress import (
@@ -104,6 +106,41 @@ def _task_to_progress_payload(
         "step_details": step_summary["details"],
         "inference_result": safe_json_loads(getattr(product, "inference_result", None), None),
         "last_error_details": task.last_error_details,
+    }
+
+
+def _workflow_lab_snapshot(db: Session, uuid: str) -> Dict[str, Any]:
+    event = db.query(Event).filter(Event.uuid == uuid).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="事件不存在")
+
+    task = db.query(TaskQueue).filter(TaskQueue.uuid == uuid).first()
+    product = db.query(Product).filter(Product.uuid == uuid).first()
+    task_payload = _task_to_progress_payload(task, event, product) if task else None
+
+    return {
+        "event": {
+            "uuid": event.uuid,
+            "title": event.title,
+            "status": event.status,
+            "country": event.country,
+            "category": event.category_name or event.category,
+            "severity": event.severity,
+            "pre_image_path": event.pre_image_path,
+            "post_image_path": event.post_image_path,
+            "has_pre_image": bool(event.pre_image_path),
+            "has_post_image": bool(event.post_image_path),
+            "quality_checked": bool(event.quality_checked),
+            "quality_pass": bool(event.quality_pass),
+            "quality_score": event.quality_score,
+            "updated_at": event.updated_at,
+        },
+        "task": task_payload,
+        "product": {
+            "exists": bool(product),
+            "summary_generated": bool(product.summary_generated) if product else False,
+            "updated_at": getattr(product, "updated_at", None),
+        },
     }
 
 
@@ -270,6 +307,180 @@ def get_task_progress(
     event = db.query(Event).filter(Event.uuid == uuid).first()
     product = db.query(Product).filter(Product.uuid == uuid).first()
     return TaskProgressDetail(**_task_to_progress_payload(task, event, product))
+
+
+@router.get("/workflow-lab/events/{uuid}")
+def get_workflow_lab_snapshot(
+    uuid: str,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    return _workflow_lab_snapshot(db, uuid)
+
+
+@router.post("/workflow-lab/events/{uuid}/quality")
+def run_workflow_lab_quality(
+    uuid: str,
+    req: WorkflowLabQualityRequest,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    event = db.query(Event).filter(Event.uuid == uuid).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="事件不存在")
+    if not event.pre_image_path or not event.post_image_path:
+        raise HTTPException(status_code=400, detail="AI 质检需要同时具备灾前和灾后影像")
+
+    from core.quality_assessor import QualityAssessor
+
+    qa = QualityAssessor()
+    result = qa.assess_pair(event.pre_image_path, event.post_image_path)
+
+    if req.persist:
+        now = _now_ms()
+        event.quality_score = result.get("score", 0)
+        event.quality_assessment = json.dumps(result, ensure_ascii=False)
+        event.quality_checked = 1
+        event.quality_pass = 1 if result.get("pass") else 0
+        event.quality_check_time = now
+        if result.get("pass"):
+            event.status = "checked"
+        event.updated_at = now
+        db.commit()
+
+    return {
+        "message": "AI 质检已完成",
+        "persisted": req.persist,
+        "result": result,
+        "snapshot": _workflow_lab_snapshot(db, uuid),
+    }
+
+
+@router.post("/workflow-lab/events/{uuid}/inference")
+def run_workflow_lab_inference(
+    uuid: str,
+    req: WorkflowLabInferenceRequest,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    event = db.query(Event).filter(Event.uuid == uuid).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="事件不存在")
+
+    task = db.query(TaskQueue).filter(TaskQueue.uuid == uuid).first()
+    if task and task.status in {"running", "pause_requested"}:
+        raise HTTPException(status_code=409, detail="任务正在执行中，请稍后再试")
+
+    from core.pool_manager import PoolManager
+
+    pm = PoolManager(db)
+    selected = req.image_type or None
+    now = _now_ms()
+
+    if not task:
+        if event.status != "checked":
+            raise HTTPException(status_code=400, detail=f"当前事件状态为 {event.status}，无法直接创建推理任务")
+        pm.enqueue_checked_events(limit=1, target_uuid=uuid, preferred_image_type=selected)
+        task = db.query(TaskQueue).filter(TaskQueue.uuid == uuid).first()
+    elif req.reset_task:
+        task_data = pm._build_task_data(event, preferred_image_type=selected)
+        initial_state = build_initial_progress_state(task_data)
+        task.task_data = json.dumps(task_data, ensure_ascii=False)
+        task.status = "pending"
+        task.pause_requested = 0
+        task.paused_at = None
+        task.locked_by = None
+        task.locked_at = None
+        task.locked_until = None
+        task.heartbeat = None
+        task.completed_at = None
+        task.failure_reason = None
+        task.last_error_details = None
+        task.progress_stage = initial_state["progress_stage"]
+        task.progress_message = "工作流测试台已重新排队该任务"
+        task.progress_percent = initial_state["progress_percent"]
+        task.current_step = initial_state["current_step"]
+        task.total_steps = initial_state["total_steps"]
+        task.step_details = initial_state["step_details"]
+        task.updated_at = now
+        event.status = "queued"
+        event.updated_at = now
+        db.commit()
+    elif selected:
+        task_data = safe_json_loads(task.task_data, {}) or {}
+        rebuilt = pm._build_task_data(event, preferred_image_type=selected)
+        task_data["image_path"] = rebuilt.get("image_path")
+        task_data["image_kind"] = rebuilt.get("image_kind")
+        task_data["selected_image_type"] = selected
+        task.task_data = json.dumps(task_data, ensure_ascii=False)
+        task.updated_at = now
+        db.commit()
+
+    processed = pm.process_pending_inference_tasks(limit=1, target_uuid=uuid)
+
+    return {
+        "message": "指定事件推理测试已触发",
+        "processed": processed,
+        "snapshot": _workflow_lab_snapshot(db, uuid),
+    }
+
+
+@router.post("/workflow-lab/events/{uuid}/summary")
+def run_workflow_lab_summary(
+    uuid: str,
+    req: WorkflowLabSummaryRequest,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    product = db.query(Product).filter(Product.uuid == uuid).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="成品不存在，请先完成推理")
+
+    from core.report_generator import ReportGenerator
+
+    rg = ReportGenerator()
+    summary = rg.generate_event_summary(product)
+    if not summary:
+        raise HTTPException(status_code=500, detail="单事件摘要生成失败")
+
+    if req.persist:
+        product.summary = summary
+        product.summary_generated = 1
+        product.summary_generated_at = _now_ms()
+        product.updated_at = _now_ms()
+        db.commit()
+
+    return {
+        "message": "单事件摘要测试已完成",
+        "persisted": req.persist,
+        "summary": summary,
+        "snapshot": _workflow_lab_snapshot(db, uuid),
+    }
+
+
+@router.post("/workflow-lab/reports/generate")
+def run_workflow_lab_report(
+    req: WorkflowLabReportRequest,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    from core.report_generator import ReportGenerator
+
+    rg = ReportGenerator()
+    report = rg.generate_daily_report(db, req.date)
+    if not report:
+        raise HTTPException(status_code=404, detail=f"日期 {req.date} 无可生成日报的数据")
+
+    return {
+        "message": "日报测试已完成",
+        "report": {
+            "date": report.report_date,
+            "title": report.report_title,
+            "event_count": report.event_count,
+            "published": bool(report.published),
+            "generated_at": report.generated_at,
+        },
+    }
 
 
 @router.post("/tasks/{uuid}/pause", response_model=MessageResponse)
