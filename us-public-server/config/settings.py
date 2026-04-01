@@ -92,6 +92,7 @@ class Settings:
         self.REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))
         self.REQUEST_DELAY = float(os.getenv("REQUEST_DELAY", "1.5"))
         self.SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "")
+        self.ENABLE_SCHEDULER = os.getenv("ENABLE_SCHEDULER", "true").lower() == "true"
 
         # 事件详情补抓
         self.DETAIL_FETCH_ENABLED = os.getenv("DETAIL_FETCH_ENABLED", "true").lower() == "true"

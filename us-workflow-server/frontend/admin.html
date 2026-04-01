@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workflow Server</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-neutral-100 text-neutral-900">
+    <div class="max-w-7xl mx-auto px-6 py-8 space-y-8">
+        <header class="space-y-2">
+            <div class="text-xs uppercase tracking-[0.35em] text-neutral-500">Disaster Workflow Server</div>
+            <h1 class="text-4xl font-black">五池工作流</h1>
+            <p class="text-sm text-neutral-600">自动只做到事件/影像，AI 审核、推理、摘要、日报候选改为人工把关。</p>
+        </header>
+
+        <section id="runtime-meta" class="grid grid-cols-1 md:grid-cols-3 gap-4"></section>
+        <section id="overview-cards" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4"></section>
+
+        <section class="bg-white border border-neutral-200 p-5 space-y-4">
+            <div class="flex flex-wrap gap-3 items-end">
+                <div>
+                    <label class="block text-xs uppercase tracking-[0.2em] text-neutral-500 mb-2">池子</label>
+                    <select id="pool-select" class="border border-neutral-300 px-3 py-2 bg-white">
+                        <option value="event_pool">事件池</option>
+                        <option value="imagery_pool">影像池</option>
+                        <option value="image_review_pool">影像审核池</option>
+                        <option value="inference_pool">推理池</option>
+                        <option value="summary_report_pool">摘要日报池</option>
+                    </select>
+                </div>
+                <button id="reload-btn" class="px-4 py-2 bg-black text-white">刷新列表</button>
+                <button id="reset-all-btn" class="px-4 py-2 border border-red-400 text-red-700">一键重置全部推理/摘要阶段</button>
+            </div>
+            <div class="overflow-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="border-b border-neutral-200 text-left">
+                            <th class="py-3">事件</th>
+                            <th class="py-3">国家</th>
+                            <th class="py-3">严重程度</th>
+                            <th class="py-3">影像</th>
+                            <th class="py-3">影像审核</th>
+                            <th class="py-3">推理</th>
+                            <th class="py-3">摘要</th>
+                            <th class="py-3">日报候选</th>
+                            <th class="py-3">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="items-tbody"></tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+    <script src="/assets/js/admin.js"></script>
+</body>
+</html>
