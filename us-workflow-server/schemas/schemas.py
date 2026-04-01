@@ -26,10 +26,9 @@ class WorkflowOverviewCard(BaseModel):
 
 class WorkflowOverviewResponse(BaseModel):
     cards: List[WorkflowOverviewCard]
-    legacy_scheduler_enabled: bool
-    legacy_root: str
-    database_path: str
-    legacy_python: str
+    service_status: str
+    automation_scope: str
+    review_scope: str
 
 
 class WorkflowItemResponse(BaseModel):

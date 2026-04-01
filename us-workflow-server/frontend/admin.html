@@ -3,256 +3,320 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Disaster Workflow V2</title>
+    <title>灾害工作台</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         :root {
-            --ink: #111111;
-            --line: #d6d3d1;
-            --sand: #f7f4ee;
-            --paper: #fffdf8;
-            --accent: #d97706;
-            --success: #166534;
-            --danger: #b91c1c;
+            --bg: #f3f0ea;
+            --panel: rgba(255, 252, 246, 0.92);
+            --line: rgba(24, 24, 24, 0.14);
+            --ink: #171717;
+            --muted: #6b6b6b;
+            --accent: #a44918;
+            --accent-soft: #f3dfd2;
+            --success: #1f6a43;
+            --danger: #b6342f;
+            --shadow: 0 14px 40px rgba(23, 23, 23, 0.08);
         }
+
+        * {
+            box-sizing: border-box;
+        }
+
         body {
+            margin: 0;
             background:
-                radial-gradient(circle at top left, rgba(217,119,6,0.08), transparent 28%),
-                linear-gradient(180deg, #faf7f1 0%, #f3efe7 100%);
+                radial-gradient(circle at top left, rgba(164, 73, 24, 0.10), transparent 24%),
+                linear-gradient(180deg, #f8f4ee 0%, var(--bg) 100%);
             color: var(--ink);
+            font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
         }
-        .grid-paper {
-            background-image:
-                linear-gradient(rgba(0,0,0,0.04) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(0,0,0,0.04) 1px, transparent 1px);
-            background-size: 28px 28px;
+
+        .shell {
+            max-width: 1760px;
+            margin: 0 auto;
+            padding: 28px;
         }
+
+        .glass {
+            background: var(--panel);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--line);
+            box-shadow: var(--shadow);
+        }
+
+        .metric-value {
+            font-size: clamp(1.8rem, 2.4vw, 2.8rem);
+            line-height: 1;
+            font-weight: 700;
+            letter-spacing: -0.05em;
+        }
+
+        .pool-chip.active {
+            background: #161616;
+            color: #fff;
+            border-color: #161616;
+            transform: translateY(-1px);
+        }
+
         .pool-card.active {
-            border-color: #111111;
-            box-shadow: 8px 8px 0 #111111;
-            transform: translate(-3px, -3px);
+            border-color: rgba(164, 73, 24, 0.4);
+            background: linear-gradient(180deg, rgba(164, 73, 24, 0.08), rgba(255, 252, 246, 0.96));
         }
-        .row-active {
-            background: #fff7ed;
+
+        .table-row-active {
+            background: rgba(164, 73, 24, 0.06);
+        }
+
+        .subtle-grid {
+            background-image:
+                linear-gradient(rgba(0, 0, 0, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 0, 0, 0.03) 1px, transparent 1px);
+            background-size: 26px 26px;
+        }
+
+        .status-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 999px;
+            display: inline-block;
+        }
+
+        .status-auto {
+            background: #3f7f5c;
+        }
+
+        .status-manual {
+            background: #a44918;
         }
     </style>
 </head>
-<body class="min-h-screen font-mono">
-    <div class="max-w-[1800px] mx-auto px-5 py-5 md:px-8 md:py-8 space-y-6">
-        <header class="grid-paper border border-black bg-[var(--paper)] p-6 md:p-8">
-            <div class="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
-                <div class="space-y-3">
-                    <div class="text-[11px] uppercase tracking-[0.45em] text-neutral-500">Disaster Workflow Server</div>
-                    <h1 class="text-3xl md:text-5xl font-black leading-none">五池工作台</h1>
-                    <p class="max-w-4xl text-sm text-neutral-600 leading-7">
-                        旧项目保留为遗留数据与资产层，新后台只负责编排和人工把关。
-                        自动到影像，人工把关影像审核、推理、摘要和日报。
-                    </p>
+<body>
+    <div class="shell space-y-6">
+        <section class="glass subtle-grid rounded-[28px] p-6 md:p-8">
+            <div class="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+                <div class="space-y-5">
+                    <div class="flex items-center gap-3 text-sm text-neutral-500">
+                        <span class="h-2.5 w-2.5 rounded-full bg-[var(--accent)]"></span>
+                        <span>灾害工作台</span>
+                    </div>
+                    <div class="space-y-3">
+                        <h1 class="text-3xl md:text-5xl font-semibold tracking-[-0.06em]">事件、影像、推理、摘要、日报</h1>
+                        <p class="max-w-3xl text-sm md:text-base leading-7 text-neutral-600">
+                            用一套界面管理五个阶段。自动任务只负责抓取和影像准备，人工在这里审核、推进、回退和发布。
+                        </p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-3 text-sm text-neutral-600">
+                        <span class="inline-flex items-center gap-2 rounded-full border border-[var(--line)] bg-white/70 px-4 py-2">
+                            <span class="status-dot status-auto"></span>
+                            自动阶段
+                        </span>
+                        <span class="inline-flex items-center gap-2 rounded-full border border-[var(--line)] bg-white/70 px-4 py-2">
+                            <span class="status-dot status-manual"></span>
+                            人工阶段
+                        </span>
+                    </div>
                 </div>
-                <div id="auth-shell" class="w-full xl:w-[420px]"></div>
+                <div id="auth-shell" class="w-full max-w-[420px]"></div>
             </div>
-        </header>
+        </section>
 
-        <section id="runtime-meta" class="grid grid-cols-1 lg:grid-cols-4 gap-4"></section>
+        <section id="runtime-meta" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4"></section>
         <section id="overview-cards" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4"></section>
 
-        <section class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.7fr)_420px] gap-6 items-start">
-            <div class="space-y-4">
-                <div class="bg-[var(--paper)] border border-black p-5 space-y-4">
-                    <div class="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+        <section class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.75fr)_420px] gap-6">
+            <div class="space-y-6">
+                <section class="glass rounded-[24px] p-6 space-y-5">
+                    <div class="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
                         <div class="space-y-2">
-                            <div class="text-[11px] uppercase tracking-[0.35em] text-neutral-500">Current Pool</div>
-                            <div id="pool-headline" class="text-2xl font-black">事件池</div>
-                            <div id="pool-description" class="text-sm text-neutral-600"></div>
+                            <div class="text-xs uppercase tracking-[0.3em] text-neutral-500">当前池子</div>
+                            <h2 id="pool-headline" class="text-3xl font-semibold tracking-[-0.05em]">事件池</h2>
+                            <p id="pool-description" class="text-sm leading-7 text-neutral-600"></p>
                         </div>
-                        <div class="flex flex-wrap gap-3 items-center">
-                            <label class="text-xs text-neutral-500 uppercase tracking-[0.25em]" for="pool-select">切换池子</label>
-                            <select id="pool-select" class="border border-black bg-white px-3 py-2 text-sm">
+                        <div class="flex flex-wrap items-center gap-3">
+                            <select id="pool-select" class="rounded-2xl border border-[var(--line)] bg-white px-4 py-3 text-sm text-neutral-800 outline-none">
                                 <option value="event_pool">事件池</option>
                                 <option value="imagery_pool">影像池</option>
                                 <option value="image_review_pool">影像审核池</option>
                                 <option value="inference_pool">推理池</option>
                                 <option value="summary_report_pool">摘要日报池</option>
                             </select>
-                            <button id="reload-btn" class="px-4 py-2 bg-black text-white text-sm">刷新</button>
+                            <button id="reload-btn" class="rounded-2xl bg-neutral-900 px-5 py-3 text-sm font-medium text-white">刷新</button>
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <div class="border border-neutral-300 p-4 bg-white">
-                            <div class="text-[11px] uppercase tracking-[0.25em] text-neutral-500">当前池数量</div>
-                            <div id="pool-total" class="mt-3 text-3xl font-black">0</div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="rounded-2xl border border-[var(--line)] bg-white/80 p-5">
+                            <div class="text-sm text-neutral-500">当前池数量</div>
+                            <div id="pool-total" class="metric-value mt-4">0</div>
                         </div>
-                        <div class="border border-neutral-300 p-4 bg-white">
-                            <div class="text-[11px] uppercase tracking-[0.25em] text-neutral-500">已选中任务</div>
-                            <div id="selected-total" class="mt-3 text-3xl font-black">0</div>
+                        <div class="rounded-2xl border border-[var(--line)] bg-white/80 p-5">
+                            <div class="text-sm text-neutral-500">已选任务</div>
+                            <div id="selected-total" class="metric-value mt-4">0</div>
                         </div>
-                        <div class="border border-neutral-300 p-4 bg-white">
-                            <div class="text-[11px] uppercase tracking-[0.25em] text-neutral-500">本池操作模式</div>
-                            <div id="pool-mode" class="mt-3 text-lg font-black">自动</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="bg-[var(--paper)] border border-black p-5 space-y-4">
-                    <div class="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                            <div class="text-[11px] uppercase tracking-[0.35em] text-neutral-500">Action Bar</div>
-                            <div class="text-lg font-black">批量操作</div>
-                        </div>
-                        <div class="flex flex-wrap gap-2 text-xs">
-                            <button id="select-all-btn" class="px-3 py-2 border border-black bg-white">全选本页</button>
-                            <button id="clear-selection-btn" class="px-3 py-2 border border-neutral-400 bg-white">清空选择</button>
-                            <button id="reset-all-btn" class="px-3 py-2 border border-red-400 text-red-700 bg-white">全部重置推理/摘要</button>
+                        <div class="rounded-2xl border border-[var(--line)] bg-white/80 p-5">
+                            <div class="text-sm text-neutral-500">当前模式</div>
+                            <div id="pool-mode" class="mt-4 text-2xl font-semibold tracking-[-0.05em]">自动</div>
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3 text-sm">
-                        <div class="border border-neutral-300 bg-white p-3">
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 text-sm">
+                        <div class="pool-card rounded-2xl border border-[var(--line)] bg-white/80 p-4" data-pool-card="event_pool">
                             <div class="text-xs uppercase tracking-[0.25em] text-neutral-500">自动</div>
-                            <div class="mt-2 font-black">事件池 / 影像池</div>
-                            <div class="mt-2 text-xs text-neutral-500 leading-6">抓事件、补详情、拉影像，默认自动流转。</div>
+                            <div class="mt-3 text-lg font-semibold">事件池</div>
+                            <div class="mt-2 leading-6 text-neutral-600">抓取事件，补充坐标和详情。</div>
                         </div>
-                        <div class="border border-neutral-300 bg-white p-3">
-                            <div class="text-xs uppercase tracking-[0.25em] text-neutral-500">人工 1</div>
-                            <div class="mt-2 font-black">影像审核池</div>
-                            <div class="mt-2 text-xs text-neutral-500 leading-6">决定影像能不能进推理，可打回、可重审。</div>
+                        <div class="pool-card rounded-2xl border border-[var(--line)] bg-white/80 p-4" data-pool-card="imagery_pool">
+                            <div class="text-xs uppercase tracking-[0.25em] text-neutral-500">自动</div>
+                            <div class="mt-3 text-lg font-semibold">影像池</div>
+                            <div class="mt-2 leading-6 text-neutral-600">跟踪影像任务，等待影像就绪。</div>
                         </div>
-                        <div class="border border-neutral-300 bg-white p-3">
-                            <div class="text-xs uppercase tracking-[0.25em] text-neutral-500">人工 2</div>
-                            <div class="mt-2 font-black">推理池</div>
-                            <div class="mt-2 text-xs text-neutral-500 leading-6">手动触发 Latest Model，失败可回退。</div>
+                        <div class="pool-card rounded-2xl border border-[var(--line)] bg-white/80 p-4" data-pool-card="image_review_pool">
+                            <div class="text-xs uppercase tracking-[0.25em] text-neutral-500">人工</div>
+                            <div class="mt-3 text-lg font-semibold">影像审核池</div>
+                            <div class="mt-2 leading-6 text-neutral-600">确认影像是否可进入推理阶段。</div>
                         </div>
-                        <div class="border border-neutral-300 bg-white p-3">
-                            <div class="text-xs uppercase tracking-[0.25em] text-neutral-500">人工 3</div>
-                            <div class="mt-2 font-black">摘要日报池</div>
-                            <div class="mt-2 text-xs text-neutral-500 leading-6">生成摘要、审核摘要、推入候选池。</div>
+                        <div class="pool-card rounded-2xl border border-[var(--line)] bg-white/80 p-4" data-pool-card="inference_pool">
+                            <div class="text-xs uppercase tracking-[0.25em] text-neutral-500">人工</div>
+                            <div class="mt-3 text-lg font-semibold">推理池</div>
+                            <div class="mt-2 leading-6 text-neutral-600">手动触发推理并处理失败项。</div>
                         </div>
-                        <div class="border border-neutral-300 bg-white p-3">
-                            <div class="text-xs uppercase tracking-[0.25em] text-neutral-500">结果</div>
-                            <div class="mt-2 font-black">日报草稿 / 发布</div>
-                            <div class="mt-2 text-xs text-neutral-500 leading-6">候选够了再出草稿，确认后再手动发布。</div>
+                        <div class="pool-card rounded-2xl border border-[var(--line)] bg-white/80 p-4" data-pool-card="summary_report_pool">
+                            <div class="text-xs uppercase tracking-[0.25em] text-neutral-500">人工</div>
+                            <div class="mt-3 text-lg font-semibold">摘要日报池</div>
+                            <div class="mt-2 leading-6 text-neutral-600">生成摘要，审核后进入日报。</div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="glass rounded-[24px] p-6 space-y-5">
+                    <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                        <div>
+                            <div class="text-xs uppercase tracking-[0.3em] text-neutral-500">批量操作</div>
+                            <h3 class="mt-2 text-2xl font-semibold tracking-[-0.05em]">先选任务，再执行操作</h3>
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            <button id="select-all-btn" class="rounded-2xl border border-[var(--line)] bg-white px-4 py-2.5 text-sm">全选本页</button>
+                            <button id="clear-selection-btn" class="rounded-2xl border border-[var(--line)] bg-white px-4 py-2.5 text-sm">清空选择</button>
+                            <button id="reset-all-btn" class="rounded-2xl border border-red-300 bg-white px-4 py-2.5 text-sm text-red-700">全部重置推理/摘要</button>
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-8 gap-3">
-                        <button data-batch-action="reset-selected" class="px-4 py-4 text-left border border-red-400 bg-white hover:bg-red-50">
-                            <div class="font-black text-red-700">重置所选</div>
-                            <div class="mt-2 text-xs text-neutral-500">清空所选推理与摘要内容</div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                        <button data-batch-action="approve-image" class="rounded-2xl border border-[var(--line)] bg-white px-4 py-4 text-left hover:border-neutral-400">
+                            <div class="font-semibold">影像审核通过</div>
+                            <div class="mt-2 text-sm leading-6 text-neutral-500">将所选事件推进到推理池。</div>
                         </button>
-                        <button data-batch-action="reset-image-review" class="px-4 py-4 text-left border border-black bg-white hover:bg-neutral-100">
-                            <div class="font-black">回退到影像审核</div>
-                            <div class="mt-2 text-xs text-neutral-500">保留影像，重新进入影像审核池</div>
+                        <button data-batch-action="reject-image" class="rounded-2xl border border-[var(--line)] bg-white px-4 py-4 text-left hover:border-neutral-400">
+                            <div class="font-semibold">影像打回</div>
+                            <div class="mt-2 text-sm leading-6 text-neutral-500">保留影像，退回影像审核池。</div>
                         </button>
-                        <button data-batch-action="reset-summary" class="px-4 py-4 text-left border border-black bg-white hover:bg-neutral-100">
-                            <div class="font-black">回退到摘要生成</div>
-                            <div class="mt-2 text-xs text-neutral-500">保留成品，清空摘要与日报候选</div>
+                        <button data-batch-action="trigger-inference" class="rounded-2xl border border-[var(--line)] bg-white px-4 py-4 text-left hover:border-neutral-400">
+                            <div class="font-semibold">触发推理</div>
+                            <div class="mt-2 text-sm leading-6 text-neutral-500">调用推理服务处理所选事件。</div>
                         </button>
-                        <button data-batch-action="approve-image" class="px-4 py-4 text-left border border-black bg-white hover:bg-amber-50">
-                            <div class="font-black">影像审核通过</div>
-                            <div class="mt-2 text-xs text-neutral-500">把选中事件推进到推理池</div>
+                        <button data-batch-action="generate-summary" class="rounded-2xl border border-[var(--line)] bg-white px-4 py-4 text-left hover:border-neutral-400">
+                            <div class="font-semibold">生成摘要</div>
+                            <div class="mt-2 text-sm leading-6 text-neutral-500">对已有成品生成摘要。</div>
                         </button>
-                        <button data-batch-action="reject-image" class="px-4 py-4 text-left border border-black bg-white hover:bg-red-50">
-                            <div class="font-black">影像打回</div>
-                            <div class="mt-2 text-xs text-neutral-500">保留影像但打回审核池</div>
+                        <button data-batch-action="approve-summary" class="rounded-2xl border border-[var(--line)] bg-white px-4 py-4 text-left hover:border-neutral-400">
+                            <div class="font-semibold">摘要进入日报</div>
+                            <div class="mt-2 text-sm leading-6 text-neutral-500">把摘要推入当前日报日期的候选池。</div>
                         </button>
-                        <button data-batch-action="trigger-inference" class="px-4 py-4 text-left border border-black bg-white hover:bg-neutral-100">
-                            <div class="font-black">触发推理</div>
-                            <div class="mt-2 text-xs text-neutral-500">调用旧推理引擎跑所选事件</div>
+                        <button data-batch-action="reject-summary" class="rounded-2xl border border-[var(--line)] bg-white px-4 py-4 text-left hover:border-neutral-400">
+                            <div class="font-semibold">摘要打回</div>
+                            <div class="mt-2 text-sm leading-6 text-neutral-500">保留成品，退回摘要修改阶段。</div>
                         </button>
-                        <button data-batch-action="generate-summary" class="px-4 py-4 text-left border border-black bg-white hover:bg-neutral-100">
-                            <div class="font-black">生成摘要</div>
-                            <div class="mt-2 text-xs text-neutral-500">对所选成品手动生成摘要</div>
+                        <button data-batch-action="reset-image-review" class="rounded-2xl border border-[var(--line)] bg-white px-4 py-4 text-left hover:border-neutral-400">
+                            <div class="font-semibold">回退到影像审核</div>
+                            <div class="mt-2 text-sm leading-6 text-neutral-500">保留影像，重新审核。</div>
                         </button>
-                        <button data-batch-action="reject-summary" class="px-4 py-4 text-left border border-black bg-white hover:bg-red-50">
-                            <div class="font-black">摘要打回</div>
-                            <div class="mt-2 text-xs text-neutral-500">保留成品，但把摘要退回待修改</div>
-                        </button>
-                        <button data-batch-action="approve-summary" class="px-4 py-4 text-left border border-black bg-white hover:bg-neutral-100">
-                            <div class="font-black">摘要准入日报</div>
-                            <div class="mt-2 text-xs text-neutral-500">把摘要推进到日报候选</div>
+                        <button data-batch-action="reset-summary" class="rounded-2xl border border-[var(--line)] bg-white px-4 py-4 text-left hover:border-neutral-400">
+                            <div class="font-semibold">回退到摘要生成</div>
+                            <div class="mt-2 text-sm leading-6 text-neutral-500">保留成品，清空摘要和候选。</div>
                         </button>
                     </div>
-                    <div id="batch-result-panel" class="hidden border border-black bg-white p-4 space-y-3">
+
+                    <div id="batch-result-panel" class="hidden rounded-2xl border border-[var(--line)] bg-white p-4 space-y-3">
                         <div class="flex items-center justify-between gap-3">
                             <div>
-                                <div class="text-[11px] uppercase tracking-[0.35em] text-neutral-500">Batch Result</div>
-                                <div id="batch-result-title" class="text-lg font-black">批量结果</div>
+                                <div class="text-xs uppercase tracking-[0.3em] text-neutral-500">批量结果</div>
+                                <div id="batch-result-title" class="mt-2 text-lg font-semibold"></div>
                             </div>
-                            <button id="batch-result-close" class="px-3 py-2 border border-black bg-white text-xs">收起</button>
+                            <button id="batch-result-close" class="rounded-2xl border border-[var(--line)] bg-white px-3 py-2 text-sm">收起</button>
                         </div>
                         <div id="batch-result-summary" class="text-sm text-neutral-600"></div>
                         <div id="batch-result-list" class="space-y-2 max-h-[260px] overflow-auto"></div>
                     </div>
-                </div>
+                </section>
 
-                <div class="bg-[var(--paper)] border border-black overflow-hidden">
-                    <div class="flex items-center justify-between px-5 py-4 border-b border-black">
+                <section class="glass rounded-[24px] overflow-hidden">
+                    <div class="flex items-center justify-between border-b border-[var(--line)] px-6 py-5">
                         <div>
-                            <div class="text-[11px] uppercase tracking-[0.35em] text-neutral-500">Pool Table</div>
-                            <div class="text-lg font-black">池子任务列表</div>
+                            <div class="text-xs uppercase tracking-[0.3em] text-neutral-500">任务列表</div>
+                            <div class="mt-2 text-2xl font-semibold tracking-[-0.05em]">当前池子任务</div>
                         </div>
-                        <div id="table-hint" class="text-xs text-neutral-500">点行查看详情</div>
+                        <div id="table-hint" class="text-sm text-neutral-500">点击任务查看详情</div>
                     </div>
                     <div class="overflow-auto">
                         <table class="w-full min-w-[1200px] text-sm">
-                            <thead class="bg-neutral-100 border-b border-black">
+                            <thead class="bg-[#f4f0e8] text-neutral-700">
                                 <tr class="text-left">
-                                    <th class="px-4 py-3"><input id="master-checkbox" type="checkbox"></th>
-                                    <th class="px-4 py-3">事件</th>
-                                    <th class="px-4 py-3">国家</th>
-                                    <th class="px-4 py-3">严重度</th>
-                                    <th class="px-4 py-3">当前阶段</th>
-                                    <th class="px-4 py-3">影像</th>
-                                    <th class="px-4 py-3">审核</th>
-                                    <th class="px-4 py-3">推理</th>
-                                    <th class="px-4 py-3">摘要</th>
-                                    <th class="px-4 py-3">日报候选</th>
-                                    <th class="px-4 py-3">更新时间</th>
+                                    <th class="px-5 py-4"><input id="master-checkbox" type="checkbox"></th>
+                                    <th class="px-5 py-4">事件</th>
+                                    <th class="px-5 py-4">国家</th>
+                                    <th class="px-5 py-4">严重度</th>
+                                    <th class="px-5 py-4">阶段</th>
+                                    <th class="px-5 py-4">影像</th>
+                                    <th class="px-5 py-4">审核</th>
+                                    <th class="px-5 py-4">推理</th>
+                                    <th class="px-5 py-4">摘要</th>
+                                    <th class="px-5 py-4">日报</th>
+                                    <th class="px-5 py-4">更新时间</th>
                                 </tr>
                             </thead>
                             <tbody id="items-tbody"></tbody>
                         </table>
                     </div>
-                </div>
+                </section>
             </div>
 
-            <aside class="space-y-4 sticky top-5">
-                <div class="bg-[var(--paper)] border border-black p-5 space-y-4">
+            <aside class="space-y-6">
+                <section class="glass rounded-[24px] p-6 space-y-4">
                     <div>
-                        <div class="text-[11px] uppercase tracking-[0.35em] text-neutral-500">Inspector</div>
-                        <div class="text-lg font-black">单事件详情</div>
+                        <div class="text-xs uppercase tracking-[0.3em] text-neutral-500">单事件详情</div>
+                        <div class="mt-2 text-2xl font-semibold tracking-[-0.05em]">详情面板</div>
                     </div>
-                    <div id="detail-empty" class="text-sm text-neutral-500 leading-7">从左侧列表点击一条事件，这里会显示该事件在五池中的位置、影像路径、推理进度、摘要和日报候选状态。</div>
+                    <div id="detail-empty" class="text-sm leading-7 text-neutral-500">从列表中选择一条事件后，这里会显示当前阶段、影像路径、推理状态、摘要内容和可用操作。</div>
                     <div id="detail-panel" class="hidden space-y-4"></div>
-                </div>
+                </section>
 
-                <div class="bg-[var(--paper)] border border-black p-5 space-y-4">
+                <section class="glass rounded-[24px] p-6 space-y-4">
                     <div>
-                        <div class="text-[11px] uppercase tracking-[0.35em] text-neutral-500">Daily Report</div>
-                        <div class="text-lg font-black">日报候选与生成</div>
+                        <div class="text-xs uppercase tracking-[0.3em] text-neutral-500">日报管理</div>
+                        <div class="mt-2 text-2xl font-semibold tracking-[-0.05em]">候选与发布</div>
                     </div>
                     <div class="space-y-3">
-                        <label class="block text-xs uppercase tracking-[0.25em] text-neutral-500" for="report-date-input">日报日期</label>
-                        <input id="report-date-input" type="date" class="w-full border border-black bg-white px-3 py-2">
+                        <label class="block text-sm text-neutral-500" for="report-date-input">日报日期</label>
+                        <input id="report-date-input" type="date" class="w-full rounded-2xl border border-[var(--line)] bg-white px-4 py-3 text-sm outline-none">
                     </div>
-                    <div class="flex gap-3">
-                        <button id="load-candidates-btn" class="flex-1 px-4 py-3 border border-black bg-white">查看候选</button>
-                        <button id="generate-report-btn" class="flex-1 px-4 py-3 bg-black text-white">生成日报</button>
+                    <div class="grid grid-cols-2 gap-3">
+                        <button id="load-candidates-btn" class="rounded-2xl border border-[var(--line)] bg-white px-4 py-3 text-sm">查看候选</button>
+                        <button id="generate-report-btn" class="rounded-2xl bg-neutral-900 px-4 py-3 text-sm text-white">生成日报</button>
                     </div>
                     <div id="candidate-summary" class="text-sm text-neutral-600"></div>
-                    <div id="candidate-list" class="space-y-2 max-h-[320px] overflow-auto"></div>
-                    <div class="border-t border-neutral-300 pt-4 space-y-3">
-                        <div class="text-[11px] uppercase tracking-[0.35em] text-neutral-500">Recent Reports</div>
-                        <div id="report-list" class="space-y-2 max-h-[260px] overflow-auto"></div>
+                    <div id="candidate-list" class="space-y-2 max-h-[260px] overflow-auto"></div>
+                    <div class="border-t border-[var(--line)] pt-4 space-y-3">
+                        <div class="text-xs uppercase tracking-[0.3em] text-neutral-500">日报列表</div>
+                        <div id="report-list" class="space-y-2 max-h-[240px] overflow-auto"></div>
                     </div>
-                    <div id="report-detail-panel" class="hidden border-t border-neutral-300 pt-4 space-y-3">
-                        <div class="text-[11px] uppercase tracking-[0.35em] text-neutral-500">Report Detail</div>
-                        <div id="report-detail-title" class="text-lg font-black"></div>
+                    <div id="report-detail-panel" class="hidden border-t border-[var(--line)] pt-4 space-y-3">
+                        <div class="text-xs uppercase tracking-[0.3em] text-neutral-500">日报内容</div>
+                        <div id="report-detail-title" class="text-lg font-semibold"></div>
                         <div id="report-detail-meta" class="text-xs text-neutral-500"></div>
-                        <div id="report-detail-content" class="border border-neutral-300 bg-white p-3 text-sm leading-7 whitespace-pre-wrap max-h-[320px] overflow-auto"></div>
+                        <div id="report-detail-content" class="max-h-[320px] overflow-auto rounded-2xl border border-[var(--line)] bg-white p-4 text-sm leading-7 whitespace-pre-wrap"></div>
                     </div>
-                </div>
+                </section>
             </aside>
         </section>
     </div>

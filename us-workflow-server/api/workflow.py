@@ -334,10 +334,9 @@ def workflow_overview(
         )
     return WorkflowOverviewResponse(
         cards=cards,
-        legacy_scheduler_enabled=settings.ENABLE_SCHEDULER,
-        legacy_root=str(settings.LEGACY_ROOT),
-        database_path=settings.DATABASE_PATH,
-        legacy_python=settings.LEGACY_PYTHON,
+        service_status="online",
+        automation_scope="事件抓取与影像准备",
+        review_scope="审核、推理、摘要、日报",
     )
 
 
