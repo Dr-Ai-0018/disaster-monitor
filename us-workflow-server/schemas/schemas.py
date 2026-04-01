@@ -176,6 +176,14 @@ class ReportSummaryListResponse(BaseModel):
     data: List[ReportSummaryResponse]
 
 
+class ReportDetailResponse(ReportSummaryResponse):
+    report_content: str
+    category_stats: Optional[str] = None
+    severity_stats: Optional[str] = None
+    country_stats: Optional[str] = None
+    published_at: Optional[int] = None
+
+
 class BatchItemResult(BaseModel):
     uuid: str
     ok: bool

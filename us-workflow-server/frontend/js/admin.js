@@ -403,10 +403,15 @@ async function loadCandidates() {
     if (!resp.ok) throw new Error(data.detail || '候选列表加载失败');
     document.getElementById('candidate-summary').textContent = `日期 ${reportDate} 当前有 ${data.total} 条候选事件`;
     document.getElementById('candidate-list').innerHTML = data.data.map((item) => `
-        <button data-candidate-uuid="${item.uuid}" class="w-full text-left border border-neutral-300 bg-white p-3 hover:bg-neutral-50">
-            <div class="font-black">${escapeHtml(item.title || item.uuid)}</div>
-            <div class="mt-1 text-xs text-neutral-500">${escapeHtml(item.country || '-')} / ${escapeHtml(item.severity || '-')}</div>
-        </button>
+        <div class="border border-neutral-300 bg-white p-3">
+            <div class="flex items-start justify-between gap-3">
+                <button data-candidate-uuid="${item.uuid}" class="flex-1 text-left hover:bg-neutral-50">
+                    <div class="font-black">${escapeHtml(item.title || item.uuid)}</div>
+                    <div class="mt-1 text-xs text-neutral-500">${escapeHtml(item.country || '-')} / ${escapeHtml(item.severity || '-')}</div>
+                </button>
+                <button data-remove-candidate="${item.uuid}" class="px-3 py-2 border border-black bg-white text-xs">移出</button>
+            </div>
+        </div>
     `).join('') || '<div class="text-sm text-neutral-500">该日期暂无候选事件</div>';
 }
 
@@ -425,11 +430,22 @@ async function loadReports() {
                 </div>
                 <div class="space-y-2 text-right">
                     <div>${badge(item.published ? '已发布' : '草稿', item.published ? 'green' : 'amber')}</div>
+                    <button data-view-report="${item.report_date}" class="px-3 py-2 border border-black bg-white text-xs">详情</button>
                     ${item.published ? '' : `<button data-publish-report="${item.report_date}" class="px-3 py-2 border border-black bg-white text-xs">发布</button>`}
                 </div>
             </div>
         </div>
     `).join('') || '<div class="text-sm text-neutral-500">暂无日报草稿或已发布日报</div>';
+}
+
+async function viewReport(reportDate) {
+    const resp = await apiFetch(`${WORKFLOW_API}/reports/${encodeURIComponent(reportDate)}`);
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || '日报详情加载失败');
+    document.getElementById('report-detail-panel').classList.remove('hidden');
+    document.getElementById('report-detail-title').textContent = data.report_title || data.report_date;
+    document.getElementById('report-detail-meta').textContent = `${data.report_date} / ${data.event_count} 条事件 / ${data.published ? '已发布' : '草稿'}`;
+    document.getElementById('report-detail-content').textContent = data.report_content || '暂无内容';
 }
 
 async function generateReport() {
@@ -450,6 +466,13 @@ async function publishReport(reportDate) {
     alert(data.message || `日报 ${reportDate} 已发布`);
     await refreshAll(false);
     await loadReports();
+}
+
+async function removeCandidate(uuid) {
+    const data = await postJson(`${WORKFLOW_API}/items/${uuid}/remove-report-candidate`);
+    alert(data.message || '已移出日报候选');
+    await refreshAll(false);
+    await loadCandidates();
 }
 
 async function bootstrapAfterLogin() {
@@ -509,6 +532,27 @@ document.addEventListener('click', async (event) => {
     if (publishBtn) {
         try {
             await publishReport(publishBtn.dataset.publishReport);
+        } catch (err) {
+            alert(err.message);
+        }
+        return;
+    }
+
+    const viewReportBtn = event.target.closest('[data-view-report]');
+    if (viewReportBtn) {
+        try {
+            await viewReport(viewReportBtn.dataset.viewReport);
+        } catch (err) {
+            alert(err.message);
+        }
+        return;
+    }
+
+    const removeCandidateBtn = event.target.closest('[data-remove-candidate]');
+    if (removeCandidateBtn) {
+        if (!confirm('确认将该事件移出日报候选？')) return;
+        try {
+            await removeCandidate(removeCandidateBtn.dataset.removeCandidate);
         } catch (err) {
             alert(err.message);
         }
@@ -588,6 +632,7 @@ document.getElementById('load-candidates-btn')?.addEventListener('click', async 
 
 document.getElementById('generate-report-btn')?.addEventListener('click', async () => {
     try {
+        if (!confirm('确认按当前候选池生成日报草稿？')) return;
         await generateReport();
     } catch (err) {
         alert(err.message);

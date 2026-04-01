@@ -21,6 +21,7 @@ from schemas.schemas import (
     ReportCandidateResponse,
     ReportGenerateRequest,
     ReportGenerateResponse,
+    ReportDetailResponse,
     ReportSummaryListResponse,
     ReportSummaryResponse,
     ResetResponse,
@@ -416,6 +417,29 @@ def list_reports(
     return ReportSummaryListResponse(total=len(data), data=data)
 
 
+@router.get("/reports/{report_date}", response_model=ReportDetailResponse)
+def get_report_detail(
+    report_date: str,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    row = db.query(DailyReport).filter(DailyReport.report_date == report_date).first()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"日期 {report_date} 无日报")
+    return ReportDetailResponse(
+        report_date=row.report_date,
+        report_title=row.report_title,
+        event_count=row.event_count or 0,
+        generated_at=row.generated_at,
+        published=bool(row.published),
+        report_content=row.report_content,
+        category_stats=row.category_stats,
+        severity_stats=row.severity_stats,
+        country_stats=row.country_stats,
+        published_at=row.published_at,
+    )
+
+
 @router.post("/items/{uuid}/reset-inference", response_model=ResetResponse)
 def reset_item_inference(
     uuid: str,
@@ -622,6 +646,32 @@ def approve_summary(
     db.commit()
     _refresh_projection(db)
     return ResetResponse(message="摘要审核结果已更新", affected=1)
+
+
+@router.post("/items/{uuid}/remove-report-candidate", response_model=ResetResponse)
+def remove_report_candidate(
+    uuid: str,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    _require_event_exists(db, uuid)
+    rows = db.query(ReportCandidate).filter(ReportCandidate.uuid == uuid, ReportCandidate.included == 1).all()
+    if not rows:
+        raise HTTPException(status_code=404, detail="当前事件不在日报候选中")
+    now = _now_ms()
+    for row in rows:
+        row.included = 0
+        row.updated_at = now
+    item = db.query(WorkflowItem).filter(WorkflowItem.uuid == uuid).first()
+    if item:
+        item.current_pool = "summary_report_pool"
+        item.pool_status = "await_report_push"
+        item.last_operator = admin.username
+        item.updated_at = now
+        item.last_transition_at = now
+    db.commit()
+    _refresh_projection(db)
+    return ResetResponse(message="已将事件移出日报候选", affected=len(rows))
 
 
 @router.post("/items/batch-summary-approval", response_model=BatchActionResponse)
