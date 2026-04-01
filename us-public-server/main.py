@@ -74,13 +74,16 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠️  GEE 初始化异常: {e}")
 
     # 4. 启动定时任务调度器
-    try:
-        from core.task_scheduler import scheduler, setup_scheduler
-        setup_scheduler()
-        scheduler.start()
-        logger.info("✅ 定时任务调度器已启动")
-    except Exception as e:
-        logger.error(f"❌ 调度器启动失败: {e}")
+    if settings.ENABLE_SCHEDULER:
+        try:
+            from core.task_scheduler import scheduler, setup_scheduler
+            setup_scheduler()
+            scheduler.start()
+            logger.info("✅ 定时任务调度器已启动")
+        except Exception as e:
+            logger.error(f"❌ 调度器启动失败: {e}")
+    else:
+        logger.warning("⚠️  定时任务调度器已禁用（ENABLE_SCHEDULER=false）")
 
     logger.info("✅ 系统启动完成，监听 http://{}:{}".format(settings.SERVER_HOST, settings.SERVER_PORT))
 

@@ -77,3 +77,13 @@ test/
 temp/
 
 skills/
+
+# ── us-workflow-server runtime / generated files ──────────────────────────────
+us-workflow-server/.env
+us-workflow-server/logs/
+us-workflow-server/storage/
+us-workflow-server/cache/
+us-workflow-server/test/output/
+us-workflow-server/tests/output/
+us-workflow-server/frontend/*.bak
+us-workflow-server/frontend/*.old

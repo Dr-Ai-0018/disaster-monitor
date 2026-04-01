@@ -1,0 +1,260 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from sqlalchemy import Column, Float, Integer, Text, create_engine, event
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+from config.settings import settings
+
+Base = declarative_base()
+
+
+class Event(Base):
+    __tablename__ = "events"
+
+    uuid = Column(Text, primary_key=True)
+    event_id = Column(Integer, nullable=False)
+    sub_id = Column(Integer, default=0)
+    title = Column(Text, nullable=False)
+    category = Column(Text)
+    category_name = Column(Text)
+    country = Column(Text)
+    continent = Column(Text)
+    severity = Column(Text)
+    longitude = Column(Float)
+    latitude = Column(Float)
+    address = Column(Text)
+    event_date = Column(Integer)
+    last_update = Column(Integer)
+    details_json = Column(Text)
+    detail_fetch_status = Column(Text)
+    detail_fetch_attempts = Column(Integer)
+    detail_fetch_last_attempt = Column(Integer)
+    detail_fetch_http_status = Column(Integer)
+    detail_fetch_error = Column(Text)
+    detail_fetch_completed_at = Column(Integer)
+    source_url = Column(Text)
+    created_at = Column(Integer, nullable=False)
+    updated_at = Column(Integer, nullable=False)
+    status = Column(Text, default="pending")
+    pre_image_path = Column(Text)
+    pre_image_date = Column(Integer)
+    pre_image_downloaded = Column(Integer, default=0)
+    pre_image_source = Column(Text)
+    post_image_path = Column(Text)
+    post_image_date = Column(Integer)
+    post_image_downloaded = Column(Integer, default=0)
+    post_image_source = Column(Text)
+    quality_score = Column(Float)
+    quality_assessment = Column(Text)
+    quality_checked = Column(Integer, default=0)
+    quality_pass = Column(Integer, default=0)
+    quality_check_time = Column(Integer)
+    pre_window_days = Column(Integer, default=7)
+    pre_imagery_last_check = Column(Integer)
+    pre_imagery_exhausted = Column(Integer, default=0)
+    post_window_days = Column(Integer, default=7)
+    post_imagery_last_check = Column(Integer)
+    post_imagery_open = Column(Integer, default=1)
+    imagery_check_count = Column(Integer, default=0)
+
+
+class TaskQueue(Base):
+    __tablename__ = "task_queue"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    uuid = Column(Text, nullable=False, unique=True)
+    task_data = Column(Text, nullable=False)
+    priority = Column(Integer, default=0)
+    status = Column(Text, default="pending")
+    locked_by = Column(Text)
+    locked_at = Column(Integer)
+    locked_until = Column(Integer)
+    lock_duration = Column(Integer, default=7200)
+    heartbeat = Column(Integer)
+    heartbeat_interval = Column(Integer, default=300)
+    retry_count = Column(Integer, default=0)
+    max_retries = Column(Integer, default=3)
+    failure_reason = Column(Text)
+    last_error_details = Column(Text)
+    progress_stage = Column(Text, default="queued")
+    progress_message = Column(Text)
+    progress_percent = Column(Integer, default=0)
+    current_step = Column(Integer, default=0)
+    total_steps = Column(Integer, default=0)
+    step_details = Column(Text)
+    pause_requested = Column(Integer, default=0)
+    paused_at = Column(Integer)
+    manual_resume_count = Column(Integer, default=0)
+    created_at = Column(Integer, nullable=False)
+    updated_at = Column(Integer, nullable=False)
+    completed_at = Column(Integer)
+
+
+class Product(Base):
+    __tablename__ = "products"
+
+    uuid = Column(Text, primary_key=True)
+    inference_result = Column(Text, nullable=False)
+    event_details = Column(Text, nullable=False)
+    event_title = Column(Text)
+    event_category = Column(Text)
+    event_country = Column(Text)
+    summary = Column(Text)
+    summary_generated = Column(Integer, default=0)
+    summary_generated_at = Column(Integer)
+    pre_image_date = Column(Integer)
+    post_image_date = Column(Integer)
+    inference_quality_score = Column(Float)
+    created_at = Column(Integer, nullable=False)
+    updated_at = Column(Integer, nullable=False)
+
+
+class DailyReport(Base):
+    __tablename__ = "daily_reports"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    report_date = Column(Text, nullable=False, unique=True)
+    report_content = Column(Text, nullable=False)
+    report_title = Column(Text)
+    event_count = Column(Integer, default=0)
+    category_stats = Column(Text)
+    severity_stats = Column(Text)
+    country_stats = Column(Text)
+    generated_at = Column(Integer, nullable=False)
+    generated_by = Column(Text)
+    generation_time_seconds = Column(Float)
+    published = Column(Integer, default=0)
+    published_at = Column(Integer)
+
+
+class AdminUser(Base):
+    __tablename__ = "admin_users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(Text, nullable=False, unique=True)
+    password_hash = Column(Text, nullable=False)
+    email = Column(Text)
+    full_name = Column(Text)
+    role = Column(Text, default="admin")
+    permissions = Column(Text)
+    is_active = Column(Integer, default=1)
+    created_at = Column(Integer, nullable=False)
+    last_login = Column(Integer)
+    login_count = Column(Integer, default=0)
+
+
+class ApiToken(Base):
+    __tablename__ = "api_tokens"
+
+    token = Column(Text, primary_key=True)
+    name = Column(Text, nullable=False)
+    description = Column(Text)
+    scopes = Column(Text)
+    is_active = Column(Integer, default=1)
+    last_used = Column(Integer)
+    usage_count = Column(Integer, default=0)
+    created_at = Column(Integer, nullable=False)
+    expires_at = Column(Integer)
+    created_by = Column(Integer)
+
+
+class WorkflowItem(Base):
+    __tablename__ = "workflow_items"
+
+    uuid = Column(Text, primary_key=True)
+    current_pool = Column(Text, nullable=False, default="event_pool")
+    pool_status = Column(Text, nullable=False, default="pending")
+    auto_stage = Column(Text, default="event_ingest")
+    manual_stage = Column(Text, default="image_review")
+    selected_image_type = Column(Text)
+    last_transition_at = Column(Integer)
+    last_operator = Column(Text)
+    notes = Column(Text)
+    created_at = Column(Integer, nullable=False)
+    updated_at = Column(Integer, nullable=False)
+
+
+class ImageReview(Base):
+    __tablename__ = "image_reviews"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    uuid = Column(Text, nullable=False)
+    selected_image_type = Column(Text, nullable=False, default="post")
+    ai_model = Column(Text)
+    ai_score = Column(Float)
+    ai_decision = Column(Text)
+    ai_reason = Column(Text)
+    human_decision = Column(Text)
+    review_status = Column(Text, default="pending")
+    reviewed_by = Column(Text)
+    reviewed_at = Column(Integer)
+    created_at = Column(Integer, nullable=False)
+    updated_at = Column(Integer, nullable=False)
+
+
+class SummaryReview(Base):
+    __tablename__ = "summary_reviews"
+
+    uuid = Column(Text, primary_key=True)
+    summary_text = Column(Text)
+    summary_status = Column(Text, default="pending")
+    approved_by = Column(Text)
+    approved_at = Column(Integer)
+    rejected_reason = Column(Text)
+    created_at = Column(Integer, nullable=False)
+    updated_at = Column(Integer, nullable=False)
+
+
+class ReportCandidate(Base):
+    __tablename__ = "report_candidates"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    uuid = Column(Text, nullable=False)
+    report_date = Column(Text, nullable=False)
+    included = Column(Integer, default=1)
+    approved_by = Column(Text)
+    approved_at = Column(Integer)
+    created_at = Column(Integer, nullable=False)
+    updated_at = Column(Integer, nullable=False)
+
+
+_engine = None
+_SessionLocal = None
+
+
+def get_engine(db_url: str | None = None):
+    global _engine
+    if _engine is None:
+        db_url = db_url or settings.DATABASE_URL
+        Path(db_url.replace("sqlite:///", "")).parent.mkdir(parents=True, exist_ok=True)
+        _engine = create_engine(
+            db_url,
+            connect_args={"check_same_thread": False, "timeout": 30},
+            echo=False,
+        )
+
+        @event.listens_for(_engine, "connect")
+        def set_wal(dbapi_conn, _):
+            dbapi_conn.execute("PRAGMA journal_mode=WAL")
+            dbapi_conn.execute("PRAGMA synchronous=NORMAL")
+            dbapi_conn.execute("PRAGMA foreign_keys=ON")
+
+    return _engine
+
+
+def get_session_factory(db_url: str | None = None):
+    global _SessionLocal
+    if _SessionLocal is None:
+        _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=get_engine(db_url))
+    return _SessionLocal
+
+
+def get_db():
+    SessionLocal = get_session_factory()
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
