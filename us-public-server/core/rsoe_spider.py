@@ -195,22 +195,41 @@ class RsoeSpider:
 
     # ── 获取事件详情（坐标 + JSON） ──────────────────────
 
-    def fetch_event_detail(self, event_id: int, sub_id: int = 0) -> Optional[Dict]:
-        """从 RSOE API 获取事件详情，含坐标"""
+    def fetch_event_detail_result(
+        self,
+        event_id: int,
+        sub_id: int = 0,
+        timeout: Optional[int] = None,
+    ) -> Dict:
+        """从 RSOE API 获取事件详情，返回带状态的结果。"""
         url = f"{self.EVENT_DETAIL_API}/{event_id}/{sub_id}"
         try:
             resp = requests.get(
                 url,
                 headers=settings.get_rsoe_api_headers(event_id, sub_id),
                 cookies=settings.get_rsoe_cookies(),
-                timeout=settings.RSOE_CONFIG.get("request_timeout", 30),
+                timeout=timeout or settings.RSOE_CONFIG.get("request_timeout", 30),
             )
+
+            if resp.status_code == 404:
+                return {
+                    "success": False,
+                    "status": "not_found",
+                    "http_status": 404,
+                    "error": f"事件详情不存在: {event_id}/{sub_id}",
+                }
+
             resp.raise_for_status()
             data = resp.json()
 
             if data.get("errorCode") not in (None, 0):
-                logger.warning(f"RSOE 详情接口返回错误 {event_id}/{sub_id}: {data.get('errorMessage')}")
-                return None
+                error_message = data.get("errorMessage") or "RSOE 详情接口返回错误"
+                return {
+                    "success": False,
+                    "status": "failed",
+                    "http_status": resp.status_code,
+                    "error": error_message,
+                }
 
             features = data.get("features") or []
             feature = features[0] if features else {}
@@ -223,23 +242,48 @@ class RsoeSpider:
             last_update = props.get("lastUpdate") or data.get("lastUpdate")
 
             return {
-                "longitude": lon,
-                "latitude": lat,
-                "continent": continent,
-                "address": address,
-                "last_update": last_update,
-                "details_json": data,
-                "geometry_type": geometry.get("type"),
-                "title": props.get("title"),
-                "category": props.get("category"),
-                "category_name": props.get("categoryName"),
-                "country": props.get("country") or props.get("countryName"),
-                "severity": props.get("severity"),
-                "event_date": props.get("eventDate"),
+                "success": True,
+                "status": "success",
+                "http_status": resp.status_code,
+                "detail": {
+                    "longitude": lon,
+                    "latitude": lat,
+                    "continent": continent,
+                    "address": address,
+                    "last_update": last_update,
+                    "details_json": data,
+                    "geometry_type": geometry.get("type"),
+                    "title": props.get("title"),
+                    "category": props.get("category"),
+                    "category_name": props.get("categoryName"),
+                    "country": props.get("country") or props.get("countryName"),
+                    "severity": props.get("severity"),
+                    "event_date": props.get("eventDate"),
+                },
             }
         except Exception as e:
             logger.error(f"获取事件详情失败 {event_id}/{sub_id}: {e}")
-            return None
+            status_code = None
+            if isinstance(e, requests.HTTPError) and getattr(e, "response", None) is not None:
+                status_code = e.response.status_code
+            return {
+                "success": False,
+                "status": "failed",
+                "http_status": status_code,
+                "error": str(e),
+            }
+
+    def fetch_event_detail(self, event_id: int, sub_id: int = 0) -> Optional[Dict]:
+        """从 RSOE API 获取事件详情，含坐标"""
+        result = self.fetch_event_detail_result(event_id, sub_id)
+        if result.get("success"):
+            return result.get("detail")
+        if result.get("status") != "not_found":
+            logger.warning(
+                f"RSOE 详情接口返回异常 {event_id}/{sub_id}: "
+                f"status={result.get('status')}, error={result.get('error')}"
+            )
+        return None
 
     def _extract_coords(self, data: Dict) -> Tuple[Optional[float], Optional[float]]:
         """从 API 响应中提取坐标"""

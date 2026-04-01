@@ -85,12 +85,13 @@ pending
 详细说明：
 
 1. `RSOE` 抓取事件并写入 `events`
-2. `GEE` 下载灾前 / 灾后影像
-3. `QualityAssessor` 用 AI 对影像可用性做判断
-4. `PoolManager` 把可推理事件写入 `task_queue`
-5. `LatestModelClient` 调用远端推理 API 并轮询结果
-6. 推理结果写入 `products`
-7. `ReportGenerator` 生成单事件摘要和日报
+2. 详情补抓器扫描 `details_json` 为空的新事件，并按 `source_url` 补抓完整详情
+3. `GEE` 下载灾前 / 灾后影像
+4. `QualityAssessor` 用 AI 对影像可用性做判断
+5. `PoolManager` 把可推理事件写入 `task_queue`
+6. `LatestModelClient` 调用远端推理 API 并轮询结果
+7. 推理结果写入 `products`
+8. `ReportGenerator` 生成单事件摘要和日报
 
 ---
 

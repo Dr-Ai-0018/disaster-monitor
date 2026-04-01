@@ -13,6 +13,12 @@ EVENT_COLUMN_MIGRATIONS = [
     "ALTER TABLE events ADD COLUMN post_imagery_last_check INTEGER",
     "ALTER TABLE events ADD COLUMN post_imagery_open INTEGER DEFAULT 1",
     "ALTER TABLE events ADD COLUMN imagery_check_count INTEGER DEFAULT 0",
+    "ALTER TABLE events ADD COLUMN detail_fetch_status TEXT DEFAULT 'pending'",
+    "ALTER TABLE events ADD COLUMN detail_fetch_attempts INTEGER DEFAULT 0",
+    "ALTER TABLE events ADD COLUMN detail_fetch_last_attempt INTEGER",
+    "ALTER TABLE events ADD COLUMN detail_fetch_http_status INTEGER",
+    "ALTER TABLE events ADD COLUMN detail_fetch_error TEXT",
+    "ALTER TABLE events ADD COLUMN detail_fetch_completed_at INTEGER",
 ]
 
 TASK_QUEUE_COLUMN_MIGRATIONS = [

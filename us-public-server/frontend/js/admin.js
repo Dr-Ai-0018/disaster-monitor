@@ -67,6 +67,7 @@ const TASK_STAGE_LABELS = {
 
 const JOB_LABELS = {
     fetch_rsoe_data: '抓取 RSOE 数据',
+    fetch_event_details: '补抓事件详情',
     process_pool: '处理事件池',
     process_inference_queue: '执行推理队列',
     recheck_imagery: '重新检查影像'
@@ -353,6 +354,14 @@ async function loadDashboard() {
             <div class="flex justify-between py-3 border-b border-gray-100">
                 <span class="font-mono text-xs uppercase tracking-wider text-gray-500">运行中任务</span>
                 <span class="font-mono text-xs font-bold">${data.database?.tasks_running || 0}</span>
+            </div>
+            <div class="flex justify-between py-3 border-b border-gray-100">
+                <span class="font-mono text-xs uppercase tracking-wider text-gray-500">待补抓详情</span>
+                <span class="font-mono text-xs font-bold">${data.database?.details_pending || 0}</span>
+            </div>
+            <div class="flex justify-between py-3 border-b border-gray-100">
+                <span class="font-mono text-xs uppercase tracking-wider text-gray-500">详情 404</span>
+                <span class="font-mono text-xs font-bold">${data.database?.details_not_found || 0}</span>
             </div>
             <div class="flex justify-between py-3">
                 <span class="font-mono text-xs uppercase tracking-wider text-gray-500">系统</span>
@@ -748,6 +757,17 @@ async function showEventDetail(uuid) {
                     <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">来源链接</div>
                     <a href="${escapeHtml(ev.source_url)}" target="_blank" rel="noopener noreferrer" class="text-blue-600 break-all underline">${escapeHtml(ev.source_url)}</a>
                 </div>` : ''}
+                <div class="border-t border-gray-100 pt-4">
+                    <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">详情补抓状态</div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 font-mono text-[10px]">
+                        <div>状态: <span class="font-bold">${escapeHtml(ev.detail_fetch_status || 'pending')}</span></div>
+                        <div>尝试次数: <span class="font-bold">${Number(ev.detail_fetch_attempts || 0)}</span></div>
+                        <div>HTTP 状态: <span class="font-bold">${ev.detail_fetch_http_status ?? '暂无'}</span></div>
+                        <div>最后尝试: <span class="font-bold">${formatDateTime(ev.detail_fetch_last_attempt)}</span></div>
+                        <div>完成时间: <span class="font-bold">${formatDateTime(ev.detail_fetch_completed_at)}</span></div>
+                        <div class="md:col-span-2">错误信息: <span class="font-bold ${ev.detail_fetch_error ? 'text-red-600' : 'text-gray-400'}">${escapeHtml(ev.detail_fetch_error || '无')}</span></div>
+                    </div>
+                </div>
                 ${ev.details_json ? `
                 <div class="border-t border-gray-100 pt-4">
                     <div class="font-bold uppercase tracking-widest text-gray-600 mb-3">原始详情</div>
@@ -1544,6 +1564,7 @@ function disableTokenFromButton(button) {
 async function triggerJob(job) {
     const jobMap = {
         'fetch': 'fetch_rsoe_data',
+        'details': 'fetch_event_details',
         'pool': 'process_pool',
         'unlock': 'process_inference_queue',
         'recheck': 'recheck_imagery',

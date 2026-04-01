@@ -83,6 +83,9 @@ def _event_to_summary(e: Event, imagery_counts: Optional[dict[str, int]] = None)
         post_imagery_count=post_count,
         has_pre_image=bool(e.pre_image_path),
         has_post_image=bool(e.post_image_path),
+        detail_fetch_status=getattr(e, "detail_fetch_status", None),
+        detail_fetch_attempts=getattr(e, "detail_fetch_attempts", 0) or 0,
+        detail_fetch_http_status=getattr(e, "detail_fetch_http_status", None),
     )
 
 
@@ -152,6 +155,12 @@ def _event_to_detail(e: Event, imagery_counts: Optional[dict[str, int]] = None) 
         post_imagery_count=post_count,
         has_pre_image=bool(e.pre_image_path),
         has_post_image=bool(e.post_image_path),
+        detail_fetch_status=getattr(e, "detail_fetch_status", None),
+        detail_fetch_attempts=getattr(e, "detail_fetch_attempts", 0) or 0,
+        detail_fetch_http_status=getattr(e, "detail_fetch_http_status", None),
+        detail_fetch_last_attempt=getattr(e, "detail_fetch_last_attempt", None),
+        detail_fetch_error=getattr(e, "detail_fetch_error", None),
+        detail_fetch_completed_at=getattr(e, "detail_fetch_completed_at", None),
     )
 
 

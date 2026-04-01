@@ -19,6 +19,12 @@ CREATE TABLE IF NOT EXISTS events (
     event_date INTEGER,
     last_update INTEGER,
     details_json TEXT,
+    detail_fetch_status TEXT DEFAULT 'pending',
+    detail_fetch_attempts INTEGER DEFAULT 0,
+    detail_fetch_last_attempt INTEGER,
+    detail_fetch_http_status INTEGER,
+    detail_fetch_error TEXT,
+    detail_fetch_completed_at INTEGER,
     source_url TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
@@ -56,6 +62,7 @@ CREATE INDEX IF NOT EXISTS idx_events_severity ON events(severity);
 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
 CREATE INDEX IF NOT EXISTS idx_events_post_imagery_open ON events(post_imagery_open);
 CREATE INDEX IF NOT EXISTS idx_events_post_imagery_check ON events(post_imagery_last_check);
+CREATE INDEX IF NOT EXISTS idx_events_detail_fetch_status ON events(detail_fetch_status);
 
 -- 2. GEE 影像下载任务表
 CREATE TABLE IF NOT EXISTS gee_tasks (

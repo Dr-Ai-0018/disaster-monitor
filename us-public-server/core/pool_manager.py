@@ -187,6 +187,10 @@ class PoolManager:
                     if detail.get("last_update"):
                         event.last_update = detail["last_update"]
                     event.details_json = json.dumps(detail.get("details_json", {}), ensure_ascii=False)
+                    event.detail_fetch_status = "success"
+                    event.detail_fetch_error = None
+                    event.detail_fetch_http_status = 200
+                    event.detail_fetch_completed_at = now
 
                     # 同步到全局事件池
                     if event.longitude and event.latitude:

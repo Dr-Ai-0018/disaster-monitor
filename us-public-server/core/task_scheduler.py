@@ -98,6 +98,8 @@ def job_fetch_rsoe():
                 latitude=ev.get("latitude"),
                 event_date=ev.get("event_date"),
                 last_update=ev.get("last_update"),
+                detail_fetch_status="pending",
+                detail_fetch_attempts=0,
                 source_url=ev.get("source_url"),
                 status="pending",
                 created_at=now,
@@ -206,6 +208,24 @@ def job_generate_report():
         db.close()
 
 
+def job_fetch_event_details():
+    """补抓新入库事件的详细信息"""
+    logger.info("⏰ [定时] 开始补抓事件详情...")
+    from core.event_detail_fetcher import EventDetailFetcher
+    from models.models import get_session_factory
+
+    SessionLocal = get_session_factory()
+    db = SessionLocal()
+    try:
+        fetcher = EventDetailFetcher(db)
+        stats = fetcher.fetch_missing_details()
+        logger.info(f"事件详情补抓完成: {stats}")
+    except Exception as e:
+        logger.error(f"事件详情补抓失败: {e}")
+    finally:
+        db.close()
+
+
 # ── 调度器配置 ────────────────────────────────────────
 
 def setup_scheduler():
@@ -224,6 +244,18 @@ def setup_scheduler():
             id="fetch_rsoe_data",
             replace_existing=True,
             misfire_grace_time=3600,
+            next_run_time=next_run,
+        )
+
+    # 每 N 分钟补抓一次空详情事件，启动后可立即执行一次
+    if settings.DETAIL_FETCH_ENABLED:
+        next_run = datetime.now(timezone.utc) if settings.DETAIL_FETCH_RUN_ON_STARTUP else None
+        scheduler.add_job(
+            job_fetch_event_details,
+            IntervalTrigger(minutes=settings.DETAIL_FETCH_INTERVAL_MINUTES),
+            id="fetch_event_details",
+            replace_existing=True,
+            misfire_grace_time=600,
             next_run_time=next_run,
         )
 

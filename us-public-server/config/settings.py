@@ -93,6 +93,16 @@ class Settings:
         self.REQUEST_DELAY = float(os.getenv("REQUEST_DELAY", "1.5"))
         self.SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "")
 
+        # 事件详情补抓
+        self.DETAIL_FETCH_ENABLED = os.getenv("DETAIL_FETCH_ENABLED", "true").lower() == "true"
+        self.DETAIL_FETCH_RUN_ON_STARTUP = os.getenv("DETAIL_FETCH_RUN_ON_STARTUP", "true").lower() == "true"
+        self.DETAIL_FETCH_INTERVAL_MINUTES = int(os.getenv("DETAIL_FETCH_INTERVAL_MINUTES", "10"))
+        self.DETAIL_FETCH_BATCH_SIZE = int(os.getenv("DETAIL_FETCH_BATCH_SIZE", "20"))
+        self.DETAIL_FETCH_CONCURRENCY = max(1, int(os.getenv("DETAIL_FETCH_CONCURRENCY", "1")))
+        self.DETAIL_FETCH_DELAY_MIN_SECONDS = float(os.getenv("DETAIL_FETCH_DELAY_MIN_SECONDS", "1"))
+        self.DETAIL_FETCH_DELAY_MAX_SECONDS = float(os.getenv("DETAIL_FETCH_DELAY_MAX_SECONDS", "3"))
+        self.DETAIL_FETCH_TIMEOUT_SECONDS = int(os.getenv("DETAIL_FETCH_TIMEOUT_SECONDS", str(self.REQUEST_TIMEOUT)))
+
         cors_str = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:8000")
         self.CORS_ORIGINS: List[str] = [o.strip() for o in cors_str.split(",") if o.strip()]
 
@@ -114,6 +124,9 @@ class Settings:
         self.STORAGE_CONFIG = self._config.get("storage", {})
         self.QUALITY_CONFIG = self._config.get("quality_assessment", {})
         self.REPORT_CONFIG = self._config.get("report_generation", {})
+
+        if self.DETAIL_FETCH_DELAY_MAX_SECONDS < self.DETAIL_FETCH_DELAY_MIN_SECONDS:
+            self.DETAIL_FETCH_DELAY_MAX_SECONDS = self.DETAIL_FETCH_DELAY_MIN_SECONDS
 
     def get(self, key: str, default: Any = None) -> Any:
         """点号路径获取 JSON 配置"""

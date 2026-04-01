@@ -186,6 +186,14 @@ SERVER_PORT=2335
 CORS_ORIGINS=https://your-domain.com,http://localhost:3000
 REQUEST_TIMEOUT=30
 REQUEST_DELAY=1.5
+DETAIL_FETCH_ENABLED=true
+DETAIL_FETCH_RUN_ON_STARTUP=true
+DETAIL_FETCH_INTERVAL_MINUTES=10
+DETAIL_FETCH_BATCH_SIZE=20
+DETAIL_FETCH_CONCURRENCY=1
+DETAIL_FETCH_DELAY_MIN_SECONDS=1
+DETAIL_FETCH_DELAY_MAX_SECONDS=3
+DETAIL_FETCH_TIMEOUT_SECONDS=30
 LOG_LEVEL=INFO
 LOG_FILE=logs/disaster.log
 ```
@@ -232,7 +240,29 @@ LOG_FILE=logs/disaster.log
 }
 ```
 
-### 4.4 日报生成
+### 4.4 事件详情自动补抓
+
+系统会自动扫描 `events` 表中 `details_json` 为空的新事件，并依据 `source_url`
+中的详情链接逐个补抓完整详情。
+
+- 默认只处理详情为空的新增事件
+- 如果详情接口返回 `404 Not Found`，事件会被标记为 `not_found`
+- 已标记 `not_found` 的事件后续自动跳过，不再重复请求
+- 默认并发为 `1`，属于保守的无害化升级
+- 请求间会根据 `.env` 中配置的最小/最大秒数进行随机等待
+
+相关环境变量：
+
+- `DETAIL_FETCH_ENABLED`：启用/禁用详情补抓
+- `DETAIL_FETCH_RUN_ON_STARTUP`：服务启动后立即执行一轮
+- `DETAIL_FETCH_INTERVAL_MINUTES`：定时扫描间隔（分钟）
+- `DETAIL_FETCH_BATCH_SIZE`：每轮最多补抓多少个空详情事件
+- `DETAIL_FETCH_CONCURRENCY`：详情抓取并发数，建议默认保持 `1`
+- `DETAIL_FETCH_DELAY_MIN_SECONDS`：两次请求之间的随机最小等待秒数
+- `DETAIL_FETCH_DELAY_MAX_SECONDS`：两次请求之间的随机最大等待秒数
+- `DETAIL_FETCH_TIMEOUT_SECONDS`：单次详情请求超时秒数
+
+### 4.5 日报生成
 
 ```json
 "report_generation": {

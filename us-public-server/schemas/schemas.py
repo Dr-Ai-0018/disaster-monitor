@@ -64,6 +64,9 @@ class EventSummary(BaseModel):
     post_imagery_count: Optional[int] = 0
     has_pre_image: Optional[bool] = False
     has_post_image: Optional[bool] = False
+    detail_fetch_status: Optional[str] = None
+    detail_fetch_attempts: Optional[int] = 0
+    detail_fetch_http_status: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -87,6 +90,9 @@ class EventDetail(EventSummary):
     pre_imagery_exhausted: Optional[bool] = False
     pre_imagery_last_check: Optional[int] = None
     post_imagery_last_check: Optional[int] = None
+    detail_fetch_last_attempt: Optional[int] = None
+    detail_fetch_error: Optional[str] = None
+    detail_fetch_completed_at: Optional[int] = None
 
 
 class EventListResponse(BaseModel):

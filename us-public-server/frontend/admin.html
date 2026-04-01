@@ -269,6 +269,10 @@
                                     <i data-lucide="download-cloud" class="w-6 h-6 mb-3 text-gray-600 group-hover:text-black"></i>
                                     <span class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-600 group-hover:text-black">抓取 RSOE</span>
                                 </button>
+                                <button onclick="window.triggerJob('details')" class="flex flex-col items-center justify-center p-5 border border-gray-200 hover:border-black hover:bg-gray-50 transition-all group">
+                                    <i data-lucide="file-search" class="w-6 h-6 mb-3 text-gray-600 group-hover:text-black"></i>
+                                    <span class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-600 group-hover:text-black">补抓详情</span>
+                                </button>
                                 <button onclick="window.triggerJob('pool')" class="flex flex-col items-center justify-center p-5 border border-gray-200 hover:border-black hover:bg-gray-50 transition-all group">
                                     <i data-lucide="play-circle" class="w-6 h-6 mb-3 text-gray-600 group-hover:text-black"></i>
                                     <span class="font-mono text-[10px] font-bold tracking-widest uppercase text-gray-600 group-hover:text-black">处理事件池</span>
@@ -772,6 +776,35 @@
                             </div>
                             <div class="md:col-span-3 flex justify-end pt-2">
                                 <button onclick="window.saveSettingsGroup('sec-scheduler')" class="settings-save-btn">保存调度配置</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Detail Fetch -->
+                    <div class="tech-card p-0 overflow-hidden">
+                        <div class="p-5 border-b border-gray-100 bg-gray-50 flex justify-between items-center cursor-pointer" onclick="window.toggleSection('sec-detail-fetch')">
+                            <div class="flex items-center gap-3">
+                                <i data-lucide="file-search" class="w-4 h-4"></i>
+                                <span class="font-mono text-sm font-bold tracking-widest">事件详情补抓</span>
+                                <span class="font-mono text-[10px] text-gray-400">仅处理 details_json 为空的新事件</span>
+                            </div>
+                            <i data-lucide="chevron-down" class="w-4 h-4 transition-transform" id="chevron-sec-detail-fetch"></i>
+                        </div>
+                        <div id="sec-detail-fetch" class="hidden p-6 grid grid-cols-1 md:grid-cols-2 gap-5">
+                            <div class="settings-field"><label class="sfield-label">启用补抓</label>
+                                <select class="sfield-input" data-key="detail_fetch_enabled"><option value="true">启用</option><option value="false">禁用</option></select>
+                            </div>
+                            <div class="settings-field"><label class="sfield-label">启动即执行</label>
+                                <select class="sfield-input" data-key="detail_fetch_run_on_startup"><option value="true">启用</option><option value="false">禁用</option></select>
+                            </div>
+                            <div class="settings-field"><label class="sfield-label">扫描间隔 (分钟)</label><input class="sfield-input" data-key="detail_fetch_interval_minutes" type="number" min="1"></div>
+                            <div class="settings-field"><label class="sfield-label">每轮处理上限</label><input class="sfield-input" data-key="detail_fetch_batch_size" type="number" min="1"></div>
+                            <div class="settings-field"><label class="sfield-label">并发数</label><input class="sfield-input" data-key="detail_fetch_concurrency" type="number" min="1"></div>
+                            <div class="settings-field"><label class="sfield-label">请求超时 (秒)</label><input class="sfield-input" data-key="detail_fetch_timeout_seconds" type="number" min="1"></div>
+                            <div class="settings-field"><label class="sfield-label">最小随机间隔 (秒)</label><input class="sfield-input" data-key="detail_fetch_delay_min_seconds" type="number" step="0.1" min="0"></div>
+                            <div class="settings-field"><label class="sfield-label">最大随机间隔 (秒)</label><input class="sfield-input" data-key="detail_fetch_delay_max_seconds" type="number" step="0.1" min="0"></div>
+                            <div class="md:col-span-2 flex justify-end pt-2">
+                                <button onclick="window.saveSettingsGroup('sec-detail-fetch')" class="settings-save-btn">保存详情补抓配置</button>
                             </div>
                         </div>
                     </div>

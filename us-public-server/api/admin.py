@@ -173,6 +173,11 @@ def system_status(
     tasks_pending = db.query(TaskQueue).filter(TaskQueue.status == "pending").count()
     tasks_running = db.query(TaskQueue).filter(TaskQueue.status == "running").count()
     products_count = db.query(Product).count()
+    details_pending = db.query(Event).filter(
+        ((Event.details_json.is_(None)) | (Event.details_json == "")),
+        ((Event.detail_fetch_status.is_(None)) | (Event.detail_fetch_status != "not_found")),
+    ).count()
+    details_not_found = db.query(Event).filter(Event.detail_fetch_status == "not_found").count()
 
     db_size_mb = 0
     try:
@@ -221,6 +226,8 @@ def system_status(
             "tasks_pending": tasks_pending,
             "tasks_running": tasks_running,
             "products_count": products_count,
+            "details_pending": details_pending,
+            "details_not_found": details_not_found,
         },
         gee={
             "authenticated": gee_authenticated,
@@ -716,6 +723,14 @@ _ENV_FIELD_MAP: Dict[str, tuple] = {
     "gee_service_account_email": ("GEE_SERVICE_ACCOUNT_EMAIL", False),
     "request_timeout":         ("REQUEST_TIMEOUT",         False),
     "request_delay":           ("REQUEST_DELAY",           False),
+    "detail_fetch_enabled":    ("DETAIL_FETCH_ENABLED",    False),
+    "detail_fetch_run_on_startup": ("DETAIL_FETCH_RUN_ON_STARTUP", False),
+    "detail_fetch_interval_minutes": ("DETAIL_FETCH_INTERVAL_MINUTES", False),
+    "detail_fetch_batch_size": ("DETAIL_FETCH_BATCH_SIZE", False),
+    "detail_fetch_concurrency": ("DETAIL_FETCH_CONCURRENCY", False),
+    "detail_fetch_delay_min_seconds": ("DETAIL_FETCH_DELAY_MIN_SECONDS", False),
+    "detail_fetch_delay_max_seconds": ("DETAIL_FETCH_DELAY_MAX_SECONDS", False),
+    "detail_fetch_timeout_seconds": ("DETAIL_FETCH_TIMEOUT_SECONDS", False),
     "cors_origins":            ("CORS_ORIGINS",            False),
     "log_level":               ("LOG_LEVEL",               False),
 }
@@ -838,6 +853,7 @@ def update_settings(
 
 VALID_JOBS = {
     "fetch_rsoe_data",
+    "fetch_event_details",
     "process_pool",
     "process_inference_queue",
     "generate_daily_report",
@@ -862,6 +878,9 @@ def trigger_job(
             if job_id == "fetch_rsoe_data":
                 from core.task_scheduler import job_fetch_rsoe
                 job_fetch_rsoe()
+            elif job_id == "fetch_event_details":
+                from core.task_scheduler import job_fetch_event_details
+                job_fetch_event_details()
             elif job_id == "process_pool":
                 from core.task_scheduler import job_process_pool
                 job_process_pool()
@@ -911,7 +930,9 @@ def export_events_csv(
     headers = [
         "uuid", "event_id", "sub_id", "title", "category_name", "country", "severity",
         "event_date", "status", "pre_image_downloaded", "post_image_downloaded",
-        "pre_imagery_count", "post_imagery_count", "quality_pass", "created_at",
+        "pre_imagery_count", "post_imagery_count", "quality_pass",
+        "detail_fetch_status", "detail_fetch_attempts", "detail_fetch_http_status",
+        "created_at",
     ]
     buf = io.StringIO()
     w = csv.writer(buf)
@@ -926,6 +947,9 @@ def export_events_csv(
             e.status,
             int(bool(e.pre_image_downloaded)), int(bool(e.post_image_downloaded)),
             pre_c, post_c, int(bool(e.quality_pass)),
+            getattr(e, "detail_fetch_status", "") or "",
+            getattr(e, "detail_fetch_attempts", 0) or 0,
+            getattr(e, "detail_fetch_http_status", "") or "",
             datetime.fromtimestamp(e.created_at / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if e.created_at else "",
         ])
     buf.seek(0)

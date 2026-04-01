@@ -145,7 +145,7 @@ Query Parameters:
 - page, limit, status, category, country, severity
 - start_date, end_date: int (timestamp in ms)
 
-Response: 同事件池，但包含更多处理状态信息
+Response: 同事件池，但包含更多处理状态信息，包括详情补抓状态字段
 ```
 
 ### 获取事件统计
@@ -175,7 +175,13 @@ Response:
 GET /api/events/{uuid}
 Authorization: Bearer {token}
 
-Response: 包含完整的处理流程信息
+Response: 包含完整的处理流程信息，以及以下详情补抓字段：
+- detail_fetch_status: pending / success / not_found / failed
+- detail_fetch_attempts: 已尝试次数
+- detail_fetch_http_status: 最近一次 HTTP 状态码
+- detail_fetch_last_attempt: 最近一次尝试时间（毫秒时间戳）
+- detail_fetch_completed_at: 最近一次成功完成时间（毫秒时间戳）
+- detail_fetch_error: 最近一次失败原因
 ```
 
 ### 手动推进事件处理
@@ -441,8 +447,10 @@ Authorization: Bearer {token}
 
 job_id 可选值:
 - fetch_rsoe_data: 抓取RSOE数据
+- fetch_event_details: 补抓空详情事件
 - process_pool: 处理蓄水池
-- release_timeout_locks: 释放超时锁
+- process_inference_queue: 执行推理队列
+- recheck_imagery: 重查缺失影像
 - generate_daily_report: 生成日报
 
 Response:
