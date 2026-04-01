@@ -24,9 +24,11 @@ LEGACY_RUNNER = textwrap.dedent(
         sys.path.insert(0, legacy_root)
 
     from config.settings import settings
+    from core.event_pool_manager import EventPoolManager
     from core.pool_manager import PoolManager
     from core.report_generator import ReportGenerator
-    from models.models import DailyReport, Event, Product, TaskQueue, get_session_factory
+    from core.rsoe_spider import RsoeSpider
+    from models.models import DailyReport, Event, EventPool, GeeTask, Product, TaskQueue, get_session_factory
     from utils.helpers import safe_json_loads
 
     def now_ms():
@@ -35,6 +37,139 @@ LEGACY_RUNNER = textwrap.dedent(
     def emit(obj, code=0):
         print(json.dumps(obj, ensure_ascii=False))
         raise SystemExit(code)
+
+    def targeted_pending_to_pool(db, event):
+        spider = RsoeSpider()
+        epm = EventPoolManager(db)
+        now = now_ms()
+        pool_event = (
+            db.query(EventPool)
+            .filter(EventPool.event_id == event.event_id, EventPool.sub_id == event.sub_id)
+            .first()
+        )
+
+        if pool_event:
+            if event.longitude is None and pool_event.longitude is not None:
+                event.longitude = pool_event.longitude
+            if event.latitude is None and pool_event.latitude is not None:
+                event.latitude = pool_event.latitude
+            if not event.continent and pool_event.continent:
+                event.continent = pool_event.continent
+            if not event.address and pool_event.address:
+                event.address = pool_event.address
+            if not event.category_name and pool_event.category_name:
+                event.category_name = pool_event.category_name
+            if not event.country and pool_event.country:
+                event.country = pool_event.country
+            if not event.event_date and pool_event.event_date:
+                event.event_date = pool_event.event_date
+            if not event.last_update and pool_event.last_update:
+                event.last_update = pool_event.last_update
+
+        detail = None
+        if event.longitude is None or event.latitude is None:
+            detail = spider.fetch_event_detail(event.event_id, event.sub_id)
+
+        if detail:
+            event.longitude = detail.get("longitude")
+            event.latitude = detail.get("latitude")
+            event.continent = detail.get("continent") or event.continent
+            event.address = detail.get("address")
+            event.country = detail.get("country") or event.country
+            event.category = detail.get("category") or event.category
+            event.category_name = detail.get("category_name") or event.category_name
+            event.severity = detail.get("severity") or event.severity
+            event.event_date = detail.get("event_date") or event.event_date
+            if detail.get("last_update"):
+                event.last_update = detail["last_update"]
+            event.details_json = json.dumps(detail.get("details_json", {}), ensure_ascii=False)
+            event.detail_fetch_status = "success"
+            event.detail_fetch_error = None
+            event.detail_fetch_http_status = 200
+            event.detail_fetch_completed_at = now
+
+            if event.longitude and event.latitude:
+                epm.update_pool_coordinates(
+                    event.event_id,
+                    event.sub_id,
+                    event.longitude,
+                    event.latitude,
+                    event.continent,
+                    event.address,
+                )
+            if detail.get("details_json"):
+                epm.update_pool_details(event.event_id, event.sub_id, detail.get("details_json", {}))
+
+        if event.longitude and event.latitude:
+            event.status = "pool"
+            epm.link_event_to_pool(event.uuid, event.event_id, event.sub_id)
+        event.updated_at = now
+        db.commit()
+
+    def targeted_pool_to_checked(pm, db, event):
+        if pm.gee.is_quota_exceeded():
+            return
+
+        now = now_ms()
+        event_ts = event.event_date or now
+        if not event.pre_image_downloaded and not event.pre_imagery_exhausted:
+            pm._submit_single_gee_task(
+                event,
+                event_ts,
+                "pre_disaster",
+                window_days=event.pre_window_days or 7,
+            )
+        if not event.post_image_downloaded and event.post_imagery_open:
+            pm._submit_single_gee_task(
+                event,
+                event_ts,
+                "post_disaster",
+                window_days=event.post_window_days or 7,
+            )
+        event.updated_at = now
+        db.commit()
+
+        active = (
+            db.query(GeeTask)
+            .filter(GeeTask.uuid == event.uuid, GeeTask.status.in_(["PENDING", "RUNNING"]))
+            .first()
+        )
+        if not active:
+            pre_done = event.pre_image_downloaded or event.pre_imagery_exhausted
+            post_done = event.post_image_downloaded or (event.post_imagery_open == 0)
+            if pre_done and post_done and not (event.pre_image_downloaded and event.post_image_downloaded):
+                if not event.pre_image_downloaded and event.pre_imagery_exhausted:
+                    event.pre_image_downloaded = 1
+                    event.pre_image_path = None
+                if not event.post_image_downloaded and event.post_imagery_open == 0:
+                    event.post_image_downloaded = 1
+                    event.post_image_path = None
+                qa = {
+                    "score": 0,
+                    "pass": pm.qa.fail_open,
+                    "no_imagery": True,
+                    "reason": "GEE 未找到可用卫星影像，依据 fail_open 配置决定是否放行",
+                }
+                event.quality_score = 0
+                event.quality_assessment = json.dumps(qa, ensure_ascii=False)
+                event.quality_checked = 1
+                event.quality_pass = 1 if pm.qa.fail_open else 0
+                event.quality_check_time = now_ms()
+                if pm.qa.fail_open:
+                    event.status = "checked"
+
+        if event.status == "pool" and event.pre_image_downloaded == 1 and event.post_image_downloaded == 1 and event.quality_checked == 0:
+            result = pm.qa.assess_pair(event.pre_image_path, event.post_image_path)
+            stamp = now_ms()
+            event.quality_score = result.get("score", 0)
+            event.quality_assessment = json.dumps(result, ensure_ascii=False)
+            event.quality_checked = 1
+            event.quality_pass = 1 if result.get("pass") else 0
+            event.quality_check_time = stamp
+            event.updated_at = stamp
+            if result.get("pass"):
+                event.status = "checked"
+        db.commit()
 
     db = get_session_factory()()
     try:
@@ -63,10 +198,9 @@ LEGACY_RUNNER = textwrap.dedent(
             refreshed = db.query(Event).filter(Event.uuid == uuid).first()
             current_status = refreshed.status if refreshed else event.status
             if current_status == "pending":
-                processed = pm.process_pending_events(limit=1)
+                targeted_pending_to_pool(db, event)
             elif current_status == "pool":
-                pm.submit_gee_tasks_for_pool(limit=1)
-                pm.assess_ready_events(limit=1)
+                targeted_pool_to_checked(pm, db, event)
             elif current_status == "checked":
                 pm.enqueue_checked_events(limit=1, target_uuid=uuid, preferred_image_type=selected_image_type)
                 processed = pm.process_pending_inference_tasks(limit=1, target_uuid=uuid)

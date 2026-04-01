@@ -174,3 +174,17 @@ class ReportSummaryResponse(BaseModel):
 class ReportSummaryListResponse(BaseModel):
     total: int
     data: List[ReportSummaryResponse]
+
+
+class BatchItemResult(BaseModel):
+    uuid: str
+    ok: bool
+    message: str
+
+
+class BatchActionResponse(BaseModel):
+    message: str
+    total: int
+    succeeded: int
+    failed: int
+    results: List[BatchItemResult]

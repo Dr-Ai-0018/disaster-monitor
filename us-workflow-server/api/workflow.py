@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from config.settings import settings
 from models.models import DailyReport, Event, ImageReview, Product, ReportCandidate, SummaryReview, TaskQueue, WorkflowItem, get_db
 from schemas.schemas import (
+    BatchActionResponse,
     BatchImageReviewRequest,
     BatchInferenceTriggerRequest,
     BatchStageResetRequest,
@@ -31,6 +32,7 @@ from schemas.schemas import (
     WorkflowItemResponse,
     WorkflowOverviewCard,
     WorkflowOverviewResponse,
+    BatchItemResult,
 )
 from services.legacy_bridge import run_legacy_action
 from services.workflow_service import (
@@ -122,6 +124,25 @@ def _get_bundle(db: Session, uuid: str):
         "daily_report": daily_report,
         "workflow_item": workflow_item,
     }
+
+
+def _require_event_exists(db: Session, uuid: str) -> Event:
+    event = db.query(Event).filter(Event.uuid == uuid).first()
+    if not event:
+        raise HTTPException(status_code=404, detail=f"事件不存在: {uuid}")
+    return event
+
+
+def _batch_response(message: str, results: list[BatchItemResult]) -> BatchActionResponse:
+    succeeded = sum(1 for item in results if item.ok)
+    failed = len(results) - succeeded
+    return BatchActionResponse(
+        message=message,
+        total=len(results),
+        succeeded=succeeded,
+        failed=failed,
+        results=results,
+    )
 
 
 def _item_payload(db: Session, event: Event) -> WorkflowItemResponse:
@@ -408,15 +429,24 @@ def reset_item_inference(
     return ResetResponse(message="已清空成品与推理/摘要阶段内容", affected=affected)
 
 
-@router.post("/items/batch-reset-inference", response_model=ResetResponse)
+@router.post("/items/batch-reset-inference", response_model=BatchActionResponse)
 def batch_reset_inference(
     req: BatchUuidRequest,
     db: Session = Depends(get_db),
     _=Depends(get_current_admin),
 ):
-    affected = reset_all_inference_stage(db, req.uuids)
+    results: list[BatchItemResult] = []
+    for uuid in req.uuids:
+        try:
+            affected = reset_inference_content(db, uuid)
+            if affected == 0:
+                results.append(BatchItemResult(uuid=uuid, ok=False, message="未找到可重置内容"))
+            else:
+                results.append(BatchItemResult(uuid=uuid, ok=True, message=f"已重置 {affected} 项"))
+        except Exception as exc:
+            results.append(BatchItemResult(uuid=uuid, ok=False, message=str(exc)))
     _refresh_projection(db)
-    return ResetResponse(message="已批量重置所选推理/摘要阶段内容", affected=affected)
+    return _batch_response("已处理所选推理/摘要阶段重置", results)
 
 
 @router.post("/items/{uuid}/reset-stage", response_model=ResetResponse)
@@ -436,7 +466,7 @@ def reset_item_stage(
     return ResetResponse(message=f"已回退到 {req.stage} 阶段", affected=affected)
 
 
-@router.post("/items/batch-reset-stage", response_model=ResetResponse)
+@router.post("/items/batch-reset-stage", response_model=BatchActionResponse)
 def batch_reset_stage(
     req: BatchStageResetRequest,
     db: Session = Depends(get_db),
@@ -444,14 +474,20 @@ def batch_reset_stage(
 ):
     if not req.uuids:
         raise HTTPException(status_code=400, detail="请选择至少一条事件")
-    affected = 0
-    try:
-        for uuid in req.uuids:
-            affected += reset_workflow_stage(db, uuid, req.stage)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    results: list[BatchItemResult] = []
+    for uuid in req.uuids:
+        try:
+            affected = reset_workflow_stage(db, uuid, req.stage)
+            if affected == 0:
+                results.append(BatchItemResult(uuid=uuid, ok=False, message="未找到可回退内容"))
+            else:
+                results.append(BatchItemResult(uuid=uuid, ok=True, message=f"已回退到 {req.stage}"))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            results.append(BatchItemResult(uuid=uuid, ok=False, message=str(exc)))
     _refresh_projection(db)
-    return ResetResponse(message=f"已批量回退到 {req.stage} 阶段", affected=affected)
+    return _batch_response(f"已处理批量阶段回退: {req.stage}", results)
 
 
 @router.post("/reset-inference-all", response_model=ResetResponse)
@@ -471,13 +507,14 @@ def decide_image_review(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
+    _require_event_exists(db, uuid)
     _upsert_image_review(db, uuid, req.approved, req.image_type, req.reason, admin.username)
     db.commit()
     _refresh_projection(db)
     return ResetResponse(message="影像审核结果已写入", affected=1)
 
 
-@router.post("/items/batch-image-review", response_model=ResetResponse)
+@router.post("/items/batch-image-review", response_model=BatchActionResponse)
 def batch_image_review(
     req: BatchImageReviewRequest,
     db: Session = Depends(get_db),
@@ -485,11 +522,17 @@ def batch_image_review(
 ):
     if not req.uuids:
         raise HTTPException(status_code=400, detail="请选择至少一条事件")
+    results: list[BatchItemResult] = []
     for uuid in req.uuids:
-        _upsert_image_review(db, uuid, req.approved, req.image_type, req.reason, admin.username)
+        try:
+            _require_event_exists(db, uuid)
+            _upsert_image_review(db, uuid, req.approved, req.image_type, req.reason, admin.username)
+            results.append(BatchItemResult(uuid=uuid, ok=True, message="影像审核结果已写入"))
+        except Exception as exc:
+            results.append(BatchItemResult(uuid=uuid, ok=False, message=str(exc)))
     db.commit()
     _refresh_projection(db)
-    return ResetResponse(message="已批量写入影像审核结果", affected=len(req.uuids))
+    return _batch_response("已处理批量影像审核", results)
 
 
 @router.post("/items/{uuid}/trigger-inference", response_model=ResetResponse)
@@ -499,7 +542,7 @@ def trigger_inference(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    _ = db
+    _require_event_exists(db, uuid)
     result = run_legacy_action("trigger_inference", {"uuid": uuid, "selected_image_type": req.selected_image_type})
     _refresh_projection(db)
     return ResetResponse(
@@ -508,7 +551,7 @@ def trigger_inference(
     )
 
 
-@router.post("/items/batch-trigger-inference", response_model=ResetResponse)
+@router.post("/items/batch-trigger-inference", response_model=BatchActionResponse)
 def batch_trigger_inference(
     req: BatchInferenceTriggerRequest,
     db: Session = Depends(get_db),
@@ -516,10 +559,22 @@ def batch_trigger_inference(
 ):
     if not req.uuids:
         raise HTTPException(status_code=400, detail="请选择至少一条事件")
+    results: list[BatchItemResult] = []
     for uuid in req.uuids:
-        run_legacy_action("trigger_inference", {"uuid": uuid, "selected_image_type": req.selected_image_type})
+        try:
+            _require_event_exists(db, uuid)
+            result = run_legacy_action("trigger_inference", {"uuid": uuid, "selected_image_type": req.selected_image_type})
+            results.append(
+                BatchItemResult(
+                    uuid=uuid,
+                    ok=True,
+                    message=f"事件 {result.get('event_status') or '-'} / 任务 {result.get('task_status') or '-'}",
+                )
+            )
+        except Exception as exc:
+            results.append(BatchItemResult(uuid=uuid, ok=False, message=str(exc)))
     _refresh_projection(db)
-    return ResetResponse(message="已批量触发推理", affected=len(req.uuids))
+    return _batch_response("已处理批量推理触发", results)
 
 
 @router.post("/items/{uuid}/generate-summary", response_model=ResetResponse)
@@ -529,12 +584,13 @@ def generate_summary(
     db: Session = Depends(get_db),
     _=Depends(get_current_admin),
 ):
+    _require_event_exists(db, uuid)
     run_legacy_action("generate_summary", {"uuid": uuid, "persist": req.persist})
     _refresh_projection(db)
     return ResetResponse(message="摘要已生成并写回数据库", affected=1)
 
 
-@router.post("/items/batch-generate-summary", response_model=ResetResponse)
+@router.post("/items/batch-generate-summary", response_model=BatchActionResponse)
 def batch_generate_summary(
     req: BatchSummaryGenerateRequest,
     db: Session = Depends(get_db),
@@ -542,10 +598,16 @@ def batch_generate_summary(
 ):
     if not req.uuids:
         raise HTTPException(status_code=400, detail="请选择至少一条事件")
+    results: list[BatchItemResult] = []
     for uuid in req.uuids:
-        run_legacy_action("generate_summary", {"uuid": uuid, "persist": req.persist})
+        try:
+            _require_event_exists(db, uuid)
+            run_legacy_action("generate_summary", {"uuid": uuid, "persist": req.persist})
+            results.append(BatchItemResult(uuid=uuid, ok=True, message="摘要生成完成"))
+        except Exception as exc:
+            results.append(BatchItemResult(uuid=uuid, ok=False, message=str(exc)))
     _refresh_projection(db)
-    return ResetResponse(message="已批量生成摘要", affected=len(req.uuids))
+    return _batch_response("已处理批量摘要生成", results)
 
 
 @router.post("/items/{uuid}/summary-approval", response_model=ResetResponse)
@@ -555,13 +617,14 @@ def approve_summary(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
+    _require_event_exists(db, uuid)
     _upsert_summary_review(db, uuid, req.approved, req.reason, req.report_date, admin.username)
     db.commit()
     _refresh_projection(db)
     return ResetResponse(message="摘要审核结果已更新", affected=1)
 
 
-@router.post("/items/batch-summary-approval", response_model=ResetResponse)
+@router.post("/items/batch-summary-approval", response_model=BatchActionResponse)
 def batch_summary_approval(
     req: BatchSummaryApprovalRequest,
     db: Session = Depends(get_db),
@@ -569,11 +632,17 @@ def batch_summary_approval(
 ):
     if not req.uuids:
         raise HTTPException(status_code=400, detail="请选择至少一条事件")
+    results: list[BatchItemResult] = []
     for uuid in req.uuids:
-        _upsert_summary_review(db, uuid, req.approved, req.reason, req.report_date, admin.username)
+        try:
+            _require_event_exists(db, uuid)
+            _upsert_summary_review(db, uuid, req.approved, req.reason, req.report_date, admin.username)
+            results.append(BatchItemResult(uuid=uuid, ok=True, message="已准入日报" if req.approved else "摘要已打回"))
+        except Exception as exc:
+            results.append(BatchItemResult(uuid=uuid, ok=False, message=str(exc)))
     db.commit()
     _refresh_projection(db)
-    return ResetResponse(message="已批量更新摘要审核结果", affected=len(req.uuids))
+    return _batch_response("已处理批量摘要审核", results)
 
 
 @router.post("/reports/generate", response_model=ReportGenerateResponse)

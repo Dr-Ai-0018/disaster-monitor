@@ -25,6 +25,7 @@ let CURRENT_ITEMS = [];
 let SELECTED_UUIDS = new Set();
 let ACTIVE_UUID = '';
 let CURRENT_REPORTS = [];
+let LAST_BATCH_RESULT = null;
 
 async function apiFetch(url, options = {}) {
     const headers = { ...(options.headers || {}) };
@@ -282,6 +283,24 @@ async function postJson(url, body) {
     return data;
 }
 
+function renderBatchResult(data) {
+    LAST_BATCH_RESULT = data;
+    const panel = document.getElementById('batch-result-panel');
+    if (!panel || !data?.results) return;
+    panel.classList.remove('hidden');
+    document.getElementById('batch-result-title').textContent = data.message || '批量结果';
+    document.getElementById('batch-result-summary').textContent = `共 ${data.total} 条，成功 ${data.succeeded} 条，失败 ${data.failed} 条`;
+    document.getElementById('batch-result-list').innerHTML = data.results.map((item) => `
+        <div class="border border-neutral-300 p-3 bg-white">
+            <div class="flex items-start justify-between gap-3">
+                <div class="font-black text-sm break-all">${escapeHtml(item.uuid)}</div>
+                ${badge(item.ok ? '成功' : '失败', item.ok ? 'green' : 'red')}
+            </div>
+            <div class="mt-2 text-xs text-neutral-500 leading-6">${escapeHtml(item.message || '')}</div>
+        </div>
+    `).join('');
+}
+
 function promptForImageType() {
     const input = prompt('影像类型: pre 或 post', 'post');
     if (!input) return undefined;
@@ -321,30 +340,32 @@ async function refreshAll(keepDetail = true) {
 async function runBatchAction(action) {
     const uuids = requireSelection();
     if (!uuids) return;
+    let result = null;
     if (action === 'reset-selected') {
-        await postJson(`${WORKFLOW_API}/items/batch-reset-inference`, { uuids });
+        result = await postJson(`${WORKFLOW_API}/items/batch-reset-inference`, { uuids });
     } else if (action === 'reset-image-review') {
-        await postJson(`${WORKFLOW_API}/items/batch-reset-stage`, { uuids, stage: 'image_review' });
+        result = await postJson(`${WORKFLOW_API}/items/batch-reset-stage`, { uuids, stage: 'image_review' });
     } else if (action === 'reset-summary') {
-        await postJson(`${WORKFLOW_API}/items/batch-reset-stage`, { uuids, stage: 'summary' });
+        result = await postJson(`${WORKFLOW_API}/items/batch-reset-stage`, { uuids, stage: 'summary' });
     } else if (action === 'approve-image') {
         const imageType = promptForImageType();
-        await postJson(`${WORKFLOW_API}/items/batch-image-review`, { uuids, approved: true, image_type: imageType });
+        result = await postJson(`${WORKFLOW_API}/items/batch-image-review`, { uuids, approved: true, image_type: imageType });
     } else if (action === 'reject-image') {
         const reason = prompt('打回原因', '') || '';
-        await postJson(`${WORKFLOW_API}/items/batch-image-review`, { uuids, approved: false, reason });
+        result = await postJson(`${WORKFLOW_API}/items/batch-image-review`, { uuids, approved: false, reason });
     } else if (action === 'trigger-inference') {
         const imageType = promptForImageType();
-        await postJson(`${WORKFLOW_API}/items/batch-trigger-inference`, { uuids, selected_image_type: imageType });
+        result = await postJson(`${WORKFLOW_API}/items/batch-trigger-inference`, { uuids, selected_image_type: imageType });
     } else if (action === 'generate-summary') {
-        await postJson(`${WORKFLOW_API}/items/batch-generate-summary`, { uuids, persist: true });
+        result = await postJson(`${WORKFLOW_API}/items/batch-generate-summary`, { uuids, persist: true });
     } else if (action === 'reject-summary') {
         const reason = prompt('摘要打回原因', '') || '';
-        await postJson(`${WORKFLOW_API}/items/batch-summary-approval`, { uuids, approved: false, reason });
+        result = await postJson(`${WORKFLOW_API}/items/batch-summary-approval`, { uuids, approved: false, reason });
     } else if (action === 'approve-summary') {
         const reportDate = document.getElementById('report-date-input')?.value || prompt('日报日期 YYYY-MM-DD', '') || '';
-        await postJson(`${WORKFLOW_API}/items/batch-summary-approval`, { uuids, approved: true, report_date: reportDate || undefined });
+        result = await postJson(`${WORKFLOW_API}/items/batch-summary-approval`, { uuids, approved: true, report_date: reportDate || undefined });
     }
+    if (result?.results) renderBatchResult(result);
     SELECTED_UUIDS.clear();
     await refreshAll();
 }
@@ -571,6 +592,10 @@ document.getElementById('generate-report-btn')?.addEventListener('click', async 
     } catch (err) {
         alert(err.message);
     }
+});
+
+document.getElementById('batch-result-close')?.addEventListener('click', () => {
+    document.getElementById('batch-result-panel')?.classList.add('hidden');
 });
 
 window.addEventListener('DOMContentLoaded', async () => {

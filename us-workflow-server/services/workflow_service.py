@@ -262,9 +262,13 @@ def derive_workflow_state(
 
 def sync_workflow_projection(db: Session) -> None:
     now = _now_ms()
+    changed = False
     events = db.query(Event).all()
     for event in events:
-        item = ensure_workflow_item(db, event)
+        existing_item = db.query(WorkflowItem).filter(WorkflowItem.uuid == event.uuid).first()
+        item = existing_item or ensure_workflow_item(db, event)
+        if existing_item is None:
+            changed = True
         task = db.query(TaskQueue).filter(TaskQueue.uuid == event.uuid).first()
         product = db.query(Product).filter(Product.uuid == event.uuid).first()
         image_review = latest_image_review(db, event.uuid)
@@ -283,14 +287,28 @@ def sync_workflow_projection(db: Session) -> None:
             report_candidate=report_candidate,
             daily_report=daily_report,
         )
+        pool_changed = item.current_pool != state["current_pool"] or item.pool_status != state["pool_status"]
+        field_changed = (
+            pool_changed
+            or item.auto_stage != state["auto_stage"]
+            or item.manual_stage != state["manual_stage"]
+            or item.selected_image_type != state["selected_image_type"]
+        )
+        if not field_changed:
+            continue
+
         item.current_pool = state["current_pool"]
         item.pool_status = state["pool_status"]
         item.auto_stage = state["auto_stage"]
         item.manual_stage = state["manual_stage"]
         item.selected_image_type = state["selected_image_type"]
         item.updated_at = now
-        item.last_transition_at = now
-    db.commit()
+        if pool_changed or not item.last_transition_at:
+            item.last_transition_at = now
+        changed = True
+
+    if changed:
+        db.commit()
 
 
 def reset_inference_content(db: Session, uuid: str) -> int:
