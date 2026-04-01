@@ -10,6 +10,7 @@ from models.models import DailyReport, Event, ImageReview, Product, ReportCandid
 from schemas.schemas import (
     BatchImageReviewRequest,
     BatchInferenceTriggerRequest,
+    BatchStageResetRequest,
     BatchSummaryApprovalRequest,
     BatchSummaryGenerateRequest,
     BatchUuidRequest,
@@ -19,7 +20,10 @@ from schemas.schemas import (
     ReportCandidateResponse,
     ReportGenerateRequest,
     ReportGenerateResponse,
+    ReportSummaryListResponse,
+    ReportSummaryResponse,
     ResetResponse,
+    StageResetRequest,
     SummaryApprovalRequest,
     SummaryGenerateRequest,
     WorkflowItemDetailResponse,
@@ -35,6 +39,7 @@ from services.workflow_service import (
     latest_report_candidate,
     reset_all_inference_stage,
     reset_inference_content,
+    reset_workflow_stage,
     sync_workflow_projection,
 )
 from utils.auth import get_current_admin
@@ -370,6 +375,26 @@ def list_report_candidates(
     return ReportCandidateListResponse(total=len(data), data=data)
 
 
+@router.get("/reports", response_model=ReportSummaryListResponse)
+def list_reports(
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    rows = db.query(DailyReport).order_by(DailyReport.report_date.desc()).limit(limit).all()
+    data = [
+        ReportSummaryResponse(
+            report_date=row.report_date,
+            report_title=row.report_title,
+            event_count=row.event_count or 0,
+            generated_at=row.generated_at,
+            published=bool(row.published),
+        )
+        for row in rows
+    ]
+    return ReportSummaryListResponse(total=len(data), data=data)
+
+
 @router.post("/items/{uuid}/reset-inference", response_model=ResetResponse)
 def reset_item_inference(
     uuid: str,
@@ -392,6 +417,41 @@ def batch_reset_inference(
     affected = reset_all_inference_stage(db, req.uuids)
     _refresh_projection(db)
     return ResetResponse(message="已批量重置所选推理/摘要阶段内容", affected=affected)
+
+
+@router.post("/items/{uuid}/reset-stage", response_model=ResetResponse)
+def reset_item_stage(
+    uuid: str,
+    req: StageResetRequest,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    try:
+        affected = reset_workflow_stage(db, uuid, req.stage)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if affected == 0:
+        raise HTTPException(status_code=404, detail="未找到可回退的内容")
+    _refresh_projection(db)
+    return ResetResponse(message=f"已回退到 {req.stage} 阶段", affected=affected)
+
+
+@router.post("/items/batch-reset-stage", response_model=ResetResponse)
+def batch_reset_stage(
+    req: BatchStageResetRequest,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    if not req.uuids:
+        raise HTTPException(status_code=400, detail="请选择至少一条事件")
+    affected = 0
+    try:
+        for uuid in req.uuids:
+            affected += reset_workflow_stage(db, uuid, req.stage)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _refresh_projection(db)
+    return ResetResponse(message=f"已批量回退到 {req.stage} 阶段", affected=affected)
 
 
 @router.post("/reset-inference-all", response_model=ResetResponse)
@@ -535,3 +595,19 @@ def generate_report(
         event_count=result.get("event_count", 0),
         published=bool(result.get("published")),
     )
+
+
+@router.post("/reports/{report_date}/publish", response_model=ResetResponse)
+def publish_report(
+    report_date: str,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    report = db.query(DailyReport).filter(DailyReport.report_date == report_date).first()
+    if not report:
+        raise HTTPException(status_code=404, detail=f"日期 {report_date} 无日报")
+    report.published = 1
+    report.published_at = _now_ms()
+    db.commit()
+    _refresh_projection(db)
+    return ResetResponse(message=f"日报 {report_date} 已发布", affected=1)

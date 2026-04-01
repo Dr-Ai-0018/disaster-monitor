@@ -346,6 +346,96 @@ def reset_inference_content(db: Session, uuid: str) -> int:
     return affected
 
 
+def reset_workflow_stage(db: Session, uuid: str, stage: str) -> int:
+    stage = (stage or "").strip()
+    if stage not in {"image_review", "inference", "summary"}:
+        raise ValueError(f"unsupported stage: {stage}")
+
+    affected = 0
+    now = _now_ms()
+
+    event = db.query(Event).filter(Event.uuid == uuid).first()
+    task = db.query(TaskQueue).filter(TaskQueue.uuid == uuid).first()
+    product = db.query(Product).filter(Product.uuid == uuid).first()
+    workflow_item = db.query(WorkflowItem).filter(WorkflowItem.uuid == uuid).first()
+    summary_review = db.query(SummaryReview).filter(SummaryReview.uuid == uuid).first()
+    image_review = latest_image_review(db, uuid)
+    report_rows = db.query(ReportCandidate).filter(ReportCandidate.uuid == uuid).all()
+
+    if stage in {"image_review", "inference"}:
+        if product:
+            db.delete(product)
+            affected += 1
+
+        if task:
+            task.status = "pending"
+            task.retry_count = 0
+            task.failure_reason = None
+            task.last_error_details = None
+            task.locked_by = None
+            task.locked_at = None
+            task.locked_until = None
+            task.heartbeat = None
+            task.completed_at = None
+            task.progress_stage = "queued"
+            task.progress_message = (
+                "已回退到影像审核阶段，等待重新审核"
+                if stage == "image_review"
+                else "已回退到推理阶段，等待重新执行"
+            )
+            task.progress_percent = 0
+            task.current_step = 0
+            task.updated_at = now
+            affected += 1
+
+    if stage == "summary" and product:
+        if product.summary:
+            affected += 1
+        product.summary = None
+        product.summary_generated = 0
+        product.summary_generated_at = None
+        product.updated_at = now
+
+    if summary_review:
+        db.delete(summary_review)
+        affected += 1
+
+    for row in report_rows:
+        db.delete(row)
+        affected += 1
+
+    if stage == "image_review" and image_review:
+        image_review.review_status = "pending"
+        image_review.human_decision = None
+        image_review.reviewed_by = None
+        image_review.reviewed_at = None
+        image_review.updated_at = now
+        affected += 1
+
+    if workflow_item:
+        if stage == "image_review":
+            workflow_item.current_pool = "image_review_pool"
+            workflow_item.pool_status = "await_image_review"
+            workflow_item.manual_stage = "image_review"
+        elif stage == "inference":
+            workflow_item.current_pool = "inference_pool"
+            workflow_item.pool_status = "await_inference_trigger"
+            workflow_item.manual_stage = "trigger_inference"
+        else:
+            workflow_item.current_pool = "summary_report_pool"
+            workflow_item.pool_status = "await_summary_generation"
+            workflow_item.manual_stage = "generate_summary"
+        workflow_item.updated_at = now
+        workflow_item.last_transition_at = now
+
+    if event:
+        event.status = "checked"
+        event.updated_at = now
+
+    db.commit()
+    return affected
+
+
 def reset_all_inference_stage(db: Session, uuids: Optional[list[str]] = None) -> int:
     total = 0
     if uuids is None:

@@ -24,6 +24,7 @@ let CURRENT_POOL = 'event_pool';
 let CURRENT_ITEMS = [];
 let SELECTED_UUIDS = new Set();
 let ACTIVE_UUID = '';
+let CURRENT_REPORTS = [];
 
 async function apiFetch(url, options = {}) {
     const headers = { ...(options.headers || {}) };
@@ -265,8 +266,10 @@ async function loadDetail(uuid) {
         </div>
         <div class="grid grid-cols-2 gap-3">
             <button data-single-action="reset" data-uuid="${escapeHtml(data.uuid)}" class="px-4 py-3 border border-red-400 text-red-700 bg-white">重置推理/摘要</button>
+            <button data-single-action="reset-stage" data-uuid="${escapeHtml(data.uuid)}" class="px-4 py-3 border border-black bg-white">回退指定阶段</button>
             <button data-single-action="trigger-inference" data-uuid="${escapeHtml(data.uuid)}" class="px-4 py-3 bg-black text-white">再次触发推理</button>
             <button data-single-action="generate-summary" data-uuid="${escapeHtml(data.uuid)}" class="px-4 py-3 border border-black bg-white">生成摘要</button>
+            <button data-single-action="reject-summary" data-uuid="${escapeHtml(data.uuid)}" class="px-4 py-3 border border-black bg-white">摘要打回</button>
             <button data-single-action="approve-summary" data-uuid="${escapeHtml(data.uuid)}" class="px-4 py-3 border border-black bg-white">摘要准入日报</button>
         </div>
     `;
@@ -284,6 +287,15 @@ function promptForImageType() {
     if (!input) return undefined;
     const normalized = input.trim().toLowerCase();
     return normalized === 'pre' ? 'pre' : 'post';
+}
+
+function promptForStageReset() {
+    const input = prompt('回退阶段: image_review / inference / summary', 'inference');
+    if (!input) return undefined;
+    const normalized = input.trim().toLowerCase();
+    if (['image_review', 'inference', 'summary'].includes(normalized)) return normalized;
+    alert('只支持 image_review、inference、summary');
+    return undefined;
 }
 
 function requireSelection() {
@@ -311,6 +323,10 @@ async function runBatchAction(action) {
     if (!uuids) return;
     if (action === 'reset-selected') {
         await postJson(`${WORKFLOW_API}/items/batch-reset-inference`, { uuids });
+    } else if (action === 'reset-image-review') {
+        await postJson(`${WORKFLOW_API}/items/batch-reset-stage`, { uuids, stage: 'image_review' });
+    } else if (action === 'reset-summary') {
+        await postJson(`${WORKFLOW_API}/items/batch-reset-stage`, { uuids, stage: 'summary' });
     } else if (action === 'approve-image') {
         const imageType = promptForImageType();
         await postJson(`${WORKFLOW_API}/items/batch-image-review`, { uuids, approved: true, image_type: imageType });
@@ -322,6 +338,9 @@ async function runBatchAction(action) {
         await postJson(`${WORKFLOW_API}/items/batch-trigger-inference`, { uuids, selected_image_type: imageType });
     } else if (action === 'generate-summary') {
         await postJson(`${WORKFLOW_API}/items/batch-generate-summary`, { uuids, persist: true });
+    } else if (action === 'reject-summary') {
+        const reason = prompt('摘要打回原因', '') || '';
+        await postJson(`${WORKFLOW_API}/items/batch-summary-approval`, { uuids, approved: false, reason });
     } else if (action === 'approve-summary') {
         const reportDate = document.getElementById('report-date-input')?.value || prompt('日报日期 YYYY-MM-DD', '') || '';
         await postJson(`${WORKFLOW_API}/items/batch-summary-approval`, { uuids, approved: true, report_date: reportDate || undefined });
@@ -333,11 +352,18 @@ async function runBatchAction(action) {
 async function runSingleAction(action, uuid) {
     if (action === 'reset') {
         await postJson(`${WORKFLOW_API}/items/${uuid}/reset-inference`);
+    } else if (action === 'reset-stage') {
+        const stage = promptForStageReset();
+        if (!stage) return;
+        await postJson(`${WORKFLOW_API}/items/${uuid}/reset-stage`, { stage });
     } else if (action === 'trigger-inference') {
         const imageType = promptForImageType();
         await postJson(`${WORKFLOW_API}/items/${uuid}/trigger-inference`, { selected_image_type: imageType });
     } else if (action === 'generate-summary') {
         await postJson(`${WORKFLOW_API}/items/${uuid}/generate-summary`, { persist: true });
+    } else if (action === 'reject-summary') {
+        const reason = prompt('摘要打回原因', '') || '';
+        await postJson(`${WORKFLOW_API}/items/${uuid}/summary-approval`, { approved: false, reason });
     } else if (action === 'approve-summary') {
         const reportDate = document.getElementById('report-date-input')?.value || prompt('日报日期 YYYY-MM-DD', '') || '';
         await postJson(`${WORKFLOW_API}/items/${uuid}/summary-approval`, { approved: true, report_date: reportDate || undefined });
@@ -363,6 +389,28 @@ async function loadCandidates() {
     `).join('') || '<div class="text-sm text-neutral-500">该日期暂无候选事件</div>';
 }
 
+async function loadReports() {
+    const resp = await apiFetch(`${WORKFLOW_API}/reports?limit=12`);
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || '日报列表加载失败');
+    CURRENT_REPORTS = data.data || [];
+    document.getElementById('report-list').innerHTML = CURRENT_REPORTS.map((item) => `
+        <div class="border border-neutral-300 bg-white p-3">
+            <div class="flex items-start justify-between gap-3">
+                <div>
+                    <div class="font-black">${escapeHtml(item.report_date)}</div>
+                    <div class="mt-1 text-xs text-neutral-500">${escapeHtml(item.report_title || '未命名日报')}</div>
+                    <div class="mt-2 text-xs text-neutral-500">${item.event_count} 条事件 / ${formatDateTime(item.generated_at)}</div>
+                </div>
+                <div class="space-y-2 text-right">
+                    <div>${badge(item.published ? '已发布' : '草稿', item.published ? 'green' : 'amber')}</div>
+                    ${item.published ? '' : `<button data-publish-report="${item.report_date}" class="px-3 py-2 border border-black bg-white text-xs">发布</button>`}
+                </div>
+            </div>
+        </div>
+    `).join('') || '<div class="text-sm text-neutral-500">暂无日报草稿或已发布日报</div>';
+}
+
 async function generateReport() {
     const reportDate = document.getElementById('report-date-input')?.value;
     if (!reportDate) {
@@ -373,11 +421,21 @@ async function generateReport() {
     alert(`日报已生成: ${data.report_title || data.report_date} / ${data.event_count} 条事件`);
     await refreshAll(false);
     await loadCandidates();
+    await loadReports();
+}
+
+async function publishReport(reportDate) {
+    const data = await postJson(`${WORKFLOW_API}/reports/${encodeURIComponent(reportDate)}/publish`);
+    alert(data.message || `日报 ${reportDate} 已发布`);
+    await refreshAll(false);
+    await loadReports();
 }
 
 async function bootstrapAfterLogin() {
     syncPoolHeader(0);
     await refreshAll(false);
+    await loadCandidates();
+    await loadReports();
 }
 
 document.addEventListener('click', async (event) => {
@@ -420,6 +478,16 @@ document.addEventListener('click', async (event) => {
     if (candidateBtn) {
         try {
             await loadDetail(candidateBtn.dataset.candidateUuid);
+        } catch (err) {
+            alert(err.message);
+        }
+        return;
+    }
+
+    const publishBtn = event.target.closest('[data-publish-report]');
+    if (publishBtn) {
+        try {
+            await publishReport(publishBtn.dataset.publishReport);
         } catch (err) {
             alert(err.message);
         }
@@ -491,6 +559,7 @@ document.getElementById('reset-all-btn')?.addEventListener('click', async () => 
 document.getElementById('load-candidates-btn')?.addEventListener('click', async () => {
     try {
         await loadCandidates();
+        await loadReports();
     } catch (err) {
         alert(err.message);
     }

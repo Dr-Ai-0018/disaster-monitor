@@ -107,10 +107,18 @@
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-8 gap-3">
                         <button data-batch-action="reset-selected" class="px-4 py-4 text-left border border-red-400 bg-white hover:bg-red-50">
                             <div class="font-black text-red-700">重置所选</div>
                             <div class="mt-2 text-xs text-neutral-500">清空所选推理与摘要内容</div>
+                        </button>
+                        <button data-batch-action="reset-image-review" class="px-4 py-4 text-left border border-black bg-white hover:bg-neutral-100">
+                            <div class="font-black">回退到影像审核</div>
+                            <div class="mt-2 text-xs text-neutral-500">保留影像，重新进入影像审核池</div>
+                        </button>
+                        <button data-batch-action="reset-summary" class="px-4 py-4 text-left border border-black bg-white hover:bg-neutral-100">
+                            <div class="font-black">回退到摘要生成</div>
+                            <div class="mt-2 text-xs text-neutral-500">保留成品，清空摘要与日报候选</div>
                         </button>
                         <button data-batch-action="approve-image" class="px-4 py-4 text-left border border-black bg-white hover:bg-amber-50">
                             <div class="font-black">影像审核通过</div>
@@ -127,6 +135,10 @@
                         <button data-batch-action="generate-summary" class="px-4 py-4 text-left border border-black bg-white hover:bg-neutral-100">
                             <div class="font-black">生成摘要</div>
                             <div class="mt-2 text-xs text-neutral-500">对所选成品手动生成摘要</div>
+                        </button>
+                        <button data-batch-action="reject-summary" class="px-4 py-4 text-left border border-black bg-white hover:bg-red-50">
+                            <div class="font-black">摘要打回</div>
+                            <div class="mt-2 text-xs text-neutral-500">保留成品，但把摘要退回待修改</div>
                         </button>
                         <button data-batch-action="approve-summary" class="px-4 py-4 text-left border border-black bg-white hover:bg-neutral-100">
                             <div class="font-black">摘要准入日报</div>
@@ -191,6 +203,10 @@
                     </div>
                     <div id="candidate-summary" class="text-sm text-neutral-600"></div>
                     <div id="candidate-list" class="space-y-2 max-h-[320px] overflow-auto"></div>
+                    <div class="border-t border-neutral-300 pt-4 space-y-3">
+                        <div class="text-[11px] uppercase tracking-[0.35em] text-neutral-500">Recent Reports</div>
+                        <div id="report-list" class="space-y-2 max-h-[260px] overflow-auto"></div>
+                    </div>
                 </div>
             </aside>
         </section>

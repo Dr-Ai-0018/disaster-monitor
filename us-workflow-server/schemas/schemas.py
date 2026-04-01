@@ -96,6 +96,15 @@ class BatchUuidRequest(BaseModel):
     uuids: List[str]
 
 
+class StageResetRequest(BaseModel):
+    stage: str
+
+
+class BatchStageResetRequest(BaseModel):
+    uuids: List[str]
+    stage: str
+
+
 class BatchImageReviewRequest(BaseModel):
     uuids: List[str]
     approved: bool
@@ -152,3 +161,16 @@ class ReportGenerateResponse(BaseModel):
     report_title: Optional[str]
     event_count: int
     published: bool
+
+
+class ReportSummaryResponse(BaseModel):
+    report_date: str
+    report_title: Optional[str]
+    event_count: int
+    generated_at: Optional[int]
+    published: bool
+
+
+class ReportSummaryListResponse(BaseModel):
+    total: int
+    data: List[ReportSummaryResponse]
