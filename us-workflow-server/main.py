@@ -47,8 +47,10 @@ from api.workflow import router as workflow_router
 app.include_router(auth_router)
 app.include_router(workflow_router)
 
-frontend_path = Path(__file__).resolve().parent / "frontend"
-app.mount("/assets/js", StaticFiles(directory=str(frontend_path / "js")), name="js")
+frontend_dist = Path(__file__).resolve().parent / "frontend" / "dist"
+
+if frontend_dist.exists():
+    app.mount("/assets", StaticFiles(directory=str(frontend_dist / "assets")), name="assets")
 
 
 @app.get("/health")
@@ -61,10 +63,17 @@ def health():
     }
 
 
-@app.get("/", include_in_schema=False)
-@app.get("/admin", include_in_schema=False)
-def admin_page():
-    return FileResponse(str(frontend_path / "admin.html"))
+@app.get("/{full_path:path}", include_in_schema=False)
+def serve_spa(full_path: str):
+    if full_path.startswith("api/"):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Not found")
+    
+    index_path = frontend_dist / "index.html"
+    if index_path.exists():
+        return FileResponse(str(index_path))
+    
+    return {"message": "Frontend not built. Run: cd frontend && npm run build"}
 
 
 if __name__ == "__main__":
