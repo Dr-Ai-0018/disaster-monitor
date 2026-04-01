@@ -275,13 +275,13 @@ class FullWorkflowSimulator:
                 "longitude": event.longitude,
             },
             "tasks": [
-                {"task_id": 1, "type": "IMG_CAP", "prompt": "Describe the disaster scene in detail."},
-                {"task_id": 2, "type": "IMG_VQA", "prompt": "Is there visible flood damage?"},
-                {"task_id": 3, "type": "IMG_CT", "prompt": "Provide a comprehensive damage assessment."},
-                {"task_id": 4, "type": "PIX_SEG", "prompt": "Segment the flooded areas."},
-                {"task_id": 5, "type": "PIX_CHG", "prompt": "Detect changes between pre and post images."},
-                {"task_id": 6, "type": "REG_DET_HBB", "prompt": "Detect damaged buildings."},
-                {"task_id": 7, "type": "REG_VG", "prompt": "Locate the most severely flooded region."},
+                {"task_id": 1, "task": "IMG_CAP", "type": "IMG_CAP", "prompt": "[IMG_CAP] Describe the disaster scene in detail."},
+                {"task_id": 2, "task": "IMG_VQA", "type": "IMG_VQA", "prompt": "[IMG_VQA] Is there visible flood damage?"},
+                {"task_id": 3, "task": "IMG_CT", "type": "IMG_CT", "prompt": "[IMG_CT] Provide a comprehensive damage assessment."},
+                {"task_id": 4, "task": "PIX_SEG", "type": "PIX_SEG", "prompt": "[PIX_SEG] Segment the flooded areas."},
+                {"task_id": 5, "task": "PIX_CHG", "type": "PIX_CHG", "prompt": "[PIX_CHG] Detect changes between pre and post images."},
+                {"task_id": 6, "task": "REG_DET_HBB", "type": "REG_DET_HBB", "prompt": "[REG_DET_HBB] Detect damaged buildings."},
+                {"task_id": 7, "task": "REG_VG", "type": "REG_VG", "prompt": "[REG_VG] Locate the most severely flooded region."},
             ]
         }
         

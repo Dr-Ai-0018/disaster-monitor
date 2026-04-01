@@ -352,6 +352,8 @@ def trigger_process(
         task_data["image_path"] = rebuilt.get("image_path")
         task_data["image_kind"] = rebuilt.get("image_kind")
         task_data["selected_image_type"] = selected_image_type
+        task_data["tasks"] = rebuilt.get("tasks") or task_data.get("tasks") or []
+        task_data["event_details"] = rebuilt.get("event_details") or task_data.get("event_details")
         existing_task.task_data = json.dumps(task_data, ensure_ascii=False)
         if existing_task.status == "pending":
             initial_state = build_initial_progress_state(task_data)

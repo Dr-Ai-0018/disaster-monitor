@@ -29,7 +29,7 @@ def normalize_task_definitions(task_data_raw: Any) -> List[Dict[str, Any]]:
         if not isinstance(task, dict):
             continue
         task_id = task.get("task_id") or index
-        task_type = str(task.get("type") or "UNKNOWN")
+        task_type = str(task.get("task") or task.get("type") or "UNKNOWN")
         prompt = str(task.get("prompt") or "").strip()
         label = prompt or task_type
         normalized.append({
@@ -39,6 +39,25 @@ def normalize_task_definitions(task_data_raw: Any) -> List[Dict[str, Any]]:
             "label": label,
         })
     return normalized
+
+
+def canonicalize_task_definitions(tasks_raw: Any) -> List[Dict[str, Any]]:
+    tasks = tasks_raw if isinstance(tasks_raw, list) else []
+    canonical: List[Dict[str, Any]] = []
+    for index, task in enumerate(tasks, start=1):
+        if not isinstance(task, dict):
+            continue
+        task_id = task.get("task_id") or index
+        task_type = str(task.get("task") or task.get("type") or "UNKNOWN").strip().upper() or "UNKNOWN"
+        prompt = str(task.get("prompt") or "").strip()
+        tagged_prompt = prompt if prompt.startswith(f"[{task_type}]") else f"[{task_type}] {prompt}".strip()
+        canonical.append({
+            "task_id": task_id,
+            "task": task_type,
+            "type": task_type,
+            "prompt": tagged_prompt,
+        })
+    return canonical
 
 
 def get_total_steps(task_data_raw: Any) -> int:

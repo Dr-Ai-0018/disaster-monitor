@@ -435,6 +435,8 @@ def run_workflow_lab_inference(
         task_data["image_path"] = rebuilt.get("image_path")
         task_data["image_kind"] = rebuilt.get("image_kind")
         task_data["selected_image_type"] = selected
+        task_data["tasks"] = rebuilt.get("tasks") or task_data.get("tasks") or []
+        task_data["event_details"] = rebuilt.get("event_details") or task_data.get("event_details")
         task.task_data = json.dumps(task_data, ensure_ascii=False)
         task.updated_at = now
         db.commit()

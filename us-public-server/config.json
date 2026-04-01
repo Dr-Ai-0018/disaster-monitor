@@ -53,38 +53,45 @@
     "tasks": [
       {
         "task_id": 1,
+        "task": "IMG_CAP",
         "type": "IMG_CAP",
-        "prompt": "Describe this satellite image in detail, focusing on visible land features, structures, and any signs of damage or disaster impact."
+        "prompt": "[IMG_CAP] Describe this satellite image in detail, focusing on visible land features, structures, and any signs of damage or disaster impact."
       },
       {
         "task_id": 2,
+        "task": "IMG_VQA",
         "type": "IMG_VQA",
-        "prompt": "Is there visible disaster impact (damage, destruction, flooding, fire, or other hazards) in this image? Answer only: Yes or No."
+        "prompt": "[IMG_VQA] Is there visible disaster impact (damage, destruction, flooding, fire, or other hazards) in this image? Answer only: Yes or No."
       },
       {
         "task_id": 3,
+        "task": "IMG_VQA",
         "type": "IMG_VQA",
-        "prompt": "What type of disaster or hazard is shown in this image? Answer with a short phrase (e.g., 'wildfire', 'flooding', 'earthquake damage', 'none')."
+        "prompt": "[IMG_VQA] What type of disaster or hazard is shown in this image? Answer with a short phrase (e.g., 'wildfire', 'flooding', 'earthquake damage', 'none')."
       },
       {
         "task_id": 4,
+        "task": "IMG_CT",
         "type": "IMG_CT",
-        "prompt": "Describe the main land-cover types and any visible changes or abnormal areas compared to a normal state."
+        "prompt": "[IMG_CT] Describe the main land-cover types and any visible changes or abnormal areas compared to a normal state."
       },
       {
         "task_id": 5,
+        "task": "PIX_SEG",
         "type": "PIX_SEG",
-        "prompt": "Segment the affected/damaged area in this image. Output polygons with <poly> ... </poly>."
+        "prompt": "[PIX_SEG] Segment the affected/damaged area in this image. Output polygons with <poly> ... </poly>."
       },
       {
         "task_id": 6,
+        "task": "PIX_CHG",
         "type": "PIX_CHG",
-        "prompt": "Locate areas that appear changed or affected by the disaster. Output polygons with <poly> ... </poly>."
+        "prompt": "[PIX_CHG] Locate areas that appear changed or affected by the disaster. Output polygons with <poly> ... </poly>."
       },
       {
         "task_id": 7,
+        "task": "REG_DET_HBB",
         "type": "REG_DET_HBB",
-        "prompt": "Detect affected or damaged regions in this image. Output horizontal bounding boxes."
+        "prompt": "[REG_DET_HBB] Detect affected or damaged regions in this image. Output horizontal bounding boxes."
       }
     ]
   },

@@ -24,13 +24,15 @@ from core.latest_model_client import LatestModelClient
 DEFAULT_TASKS = [
     {
         "task_id": 1,
+        "task": "IMG_CAP",
         "type": "IMG_CAP",
-        "prompt": "Describe this satellite image in detail, focusing on visible land features, structures, and any signs of damage or disaster impact.",
+        "prompt": "[IMG_CAP] Describe this satellite image in detail, focusing on visible land features, structures, and any signs of damage or disaster impact.",
     },
     {
         "task_id": 2,
+        "task": "IMG_VQA",
         "type": "IMG_VQA",
-        "prompt": "Is there visible disaster impact (damage, destruction, flooding, fire, or other hazards) in this image? Answer only: Yes or No.",
+        "prompt": "[IMG_VQA] Is there visible disaster impact (damage, destruction, flooding, fire, or other hazards) in this image? Answer only: Yes or No.",
     },
 ]
 

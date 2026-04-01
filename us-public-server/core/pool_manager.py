@@ -18,6 +18,7 @@ from utils.logger import get_logger
 from utils.task_progress import (
     build_initial_progress_state,
     build_step_details,
+    canonicalize_task_definitions,
     get_total_steps,
     safe_json_loads,
 )
@@ -550,7 +551,7 @@ class PoolManager:
 
     def _build_task_data(self, event: Event, preferred_image_type: Optional[str] = None) -> dict:
         """构建 Latest Model Open API 需要的任务数据"""
-        task_definitions = self.task_cfg.get("tasks", [])
+        raw_task_definitions = self.task_cfg.get("tasks", [])
         image_path, image_kind = self._resolve_task_image(event, preferred_image_type)
 
         details = {}
@@ -559,6 +560,8 @@ class PoolManager:
                 details = json.loads(event.details_json)
             except Exception:
                 pass
+
+        task_definitions = canonicalize_task_definitions(raw_task_definitions)
 
         return {
             "uuid": event.uuid,
@@ -617,11 +620,11 @@ class PoolManager:
         normalized: Dict[str, Any] = {}
 
         for idx, item in enumerate(result_items, start=1):
-            task_type = str(item.get("task") or "UNKNOWN")
+            task_type = str(item.get("task") or item.get("type") or "UNKNOWN")
             key = f"{idx:02d}_{task_type}"
             normalized[key] = {
                 "type": task_type,
-                "result": item.get("answer"),
+                "result": item.get("answer") if item.get("answer") is not None else item.get("result"),
                 "raw_text": item.get("raw_text"),
                 "timing": item.get("timing"),
                 "source": "latest_model_open_api",
@@ -677,6 +680,21 @@ class PoolManager:
 
             try:
                 task_data = safe_json_loads(task.task_data, {})
+                if not isinstance(task_data, dict):
+                    task_data = {}
+                selected_image_type = task_data.get("selected_image_type")
+                rebuilt_task_data = self._build_task_data(event, preferred_image_type=selected_image_type)
+                current_task_defs = task_data.get("tasks") or []
+                canonical_task_defs = canonicalize_task_definitions(current_task_defs)
+                if canonical_task_defs != current_task_defs:
+                    task_data["tasks"] = canonical_task_defs
+                    if not task_data.get("image_path"):
+                        task_data["image_path"] = rebuilt_task_data.get("image_path")
+                    if not task_data.get("image_kind"):
+                        task_data["image_kind"] = rebuilt_task_data.get("image_kind")
+                    if "event_details" not in task_data:
+                        task_data["event_details"] = rebuilt_task_data.get("event_details")
+                    task.task_data = json.dumps(task_data, ensure_ascii=False)
                 image_path = task_data.get("image_path")
                 task_defs = task_data.get("tasks") or []
                 now = _now_ms()
@@ -781,7 +799,7 @@ class PoolManager:
                 self.db.commit()
 
                 if task_defs:
-                    self._update_step_details(task, running_task_type=str(task_defs[0].get("task") or "UNKNOWN"))
+                    self._update_step_details(task, running_task_type=str(task_defs[0].get("task") or task_defs[0].get("type") or "UNKNOWN"))
                 task.progress_stage = "polling"
                 task.progress_message = f"远程任务执行中，job_id={job_id}"
                 task.progress_percent = 55
