@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any, List
 
@@ -44,6 +45,7 @@ class Settings:
             str((self.PROJECT_ROOT / "logs" / "workflow.log").resolve()),
         )
         self.ENABLE_SCHEDULER = os.getenv("ENABLE_SCHEDULER", "true").lower() == "true"
+        self.LEGACY_PYTHON = os.getenv("LEGACY_PYTHON", self._detect_legacy_python())
 
         database_url = os.getenv("DATABASE_URL", "").strip()
         if database_url:
@@ -72,6 +74,16 @@ class Settings:
         self.SCHEDULER_CONFIG = self._config.get("scheduler", {})
         self.GEE_CONFIG = self._config.get("gee", {})
         self.TASK_QUEUE_CONFIG = self._config.get("task_queue", {})
+
+    def _detect_legacy_python(self) -> str:
+        candidates = [
+            self.LEGACY_ROOT / ".venv" / "Scripts" / "python.exe",
+            self.LEGACY_ROOT / ".venv" / "bin" / "python",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return str(candidate.resolve())
+        return sys.executable
 
     def get(self, key: str, default: Any = None) -> Any:
         value: Any = self._config

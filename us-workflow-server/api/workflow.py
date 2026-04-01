@@ -6,17 +6,37 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from config.settings import settings
-from models.models import Event, ImageReview, Product, ReportCandidate, SummaryReview, TaskQueue, WorkflowItem, get_db
+from models.models import DailyReport, Event, ImageReview, Product, ReportCandidate, SummaryReview, TaskQueue, WorkflowItem, get_db
 from schemas.schemas import (
+    BatchImageReviewRequest,
+    BatchInferenceTriggerRequest,
+    BatchSummaryApprovalRequest,
+    BatchSummaryGenerateRequest,
+    BatchUuidRequest,
     ImageReviewDecisionRequest,
+    InferenceTriggerRequest,
+    ReportCandidateListResponse,
+    ReportCandidateResponse,
+    ReportGenerateRequest,
+    ReportGenerateResponse,
     ResetResponse,
     SummaryApprovalRequest,
+    SummaryGenerateRequest,
+    WorkflowItemDetailResponse,
     WorkflowItemListResponse,
     WorkflowItemResponse,
     WorkflowOverviewCard,
     WorkflowOverviewResponse,
 )
-from services.workflow_service import ensure_workflow_item, reset_all_inference_stage, reset_inference_content, sync_workflow_projection
+from services.legacy_bridge import run_legacy_action
+from services.workflow_service import (
+    ensure_workflow_item,
+    latest_image_review,
+    latest_report_candidate,
+    reset_all_inference_stage,
+    reset_inference_content,
+    sync_workflow_projection,
+)
 from utils.auth import get_current_admin
 
 router = APIRouter(prefix="/api/workflow", tags=["workflow"])
@@ -26,55 +46,231 @@ def _now_ms() -> int:
     return int(datetime.now(timezone.utc).timestamp() * 1000)
 
 
-def _quality_label(review: ImageReview | None) -> str:
+def _refresh_projection(db: Session) -> None:
+    db.expire_all()
+    sync_workflow_projection(db)
+
+
+def _quality_label(review) -> str:
     if not review:
         return "待审核"
     mapping = {"approved": "已通过", "rejected": "已打回", "pending": "待审核"}
     return mapping.get(review.review_status or "pending", review.review_status or "待审核")
 
 
-def _summary_label(product: Product | None, summary_review: SummaryReview | None) -> str:
+def _summary_label(product: Product | None, summary_review: SummaryReview | None, report_candidate: ReportCandidate | None) -> str:
     if not product:
         return "无成品"
     if not product.summary:
         return "待生成摘要"
     if not summary_review:
         return "待人工审核"
-    mapping = {"approved": "已准入日报", "rejected": "摘要已打回", "pending": "待人工审核"}
-    return mapping.get(summary_review.summary_status or "pending", summary_review.summary_status or "待人工审核")
+    if summary_review.summary_status == "rejected":
+        return "摘要已打回"
+    if report_candidate:
+        return "已准入日报"
+    return "摘要已通过"
+
+
+def _pool_status_label(pool_status: str) -> str:
+    mapping = {
+        "await_imagery": "待影像",
+        "imagery_ready_pending_quality": "待质检归档",
+        "await_image_review": "待影像审核",
+        "image_rejected": "影像已打回",
+        "await_inference_trigger": "待触发推理",
+        "await_inference_execution": "待执行推理",
+        "inference_running": "推理中",
+        "inference_needs_attention": "推理需处理",
+        "await_product_materialization": "待落成品",
+        "await_summary_generation": "待生成摘要",
+        "await_summary_review": "待摘要审核",
+        "summary_rejected": "摘要已打回",
+        "await_report_push": "待推入日报",
+        "ready_for_daily_report": "可生成日报",
+        "report_draft_ready": "日报草稿已生成",
+        "report_published": "日报已发布",
+    }
+    return mapping.get(pool_status, pool_status)
+
+
+def _get_bundle(db: Session, uuid: str):
+    event = db.query(Event).filter(Event.uuid == uuid).first()
+    if not event:
+        return None
+    task = db.query(TaskQueue).filter(TaskQueue.uuid == uuid).first()
+    product = db.query(Product).filter(Product.uuid == uuid).first()
+    image_review = latest_image_review(db, uuid)
+    summary_review = db.query(SummaryReview).filter(SummaryReview.uuid == uuid).first()
+    report_candidate = latest_report_candidate(db, uuid)
+    daily_report = None
+    if report_candidate:
+        daily_report = db.query(DailyReport).filter(DailyReport.report_date == report_candidate.report_date).first()
+    workflow_item = ensure_workflow_item(db, event)
+    return {
+        "event": event,
+        "task": task,
+        "product": product,
+        "image_review": image_review,
+        "summary_review": summary_review,
+        "report_candidate": report_candidate,
+        "daily_report": daily_report,
+        "workflow_item": workflow_item,
+    }
 
 
 def _item_payload(db: Session, event: Event) -> WorkflowItemResponse:
-    task = db.query(TaskQueue).filter(TaskQueue.uuid == event.uuid).first()
-    product = db.query(Product).filter(Product.uuid == event.uuid).first()
-    image_review = (
-        db.query(ImageReview)
-        .filter(ImageReview.uuid == event.uuid)
-        .order_by(ImageReview.updated_at.desc(), ImageReview.id.desc())
-        .first()
-    )
-    summary_review = db.query(SummaryReview).filter(SummaryReview.uuid == event.uuid).first()
-    report_candidate = (
-        db.query(ReportCandidate)
-        .filter(ReportCandidate.uuid == event.uuid, ReportCandidate.included == 1)
-        .order_by(ReportCandidate.updated_at.desc(), ReportCandidate.id.desc())
-        .first()
-    )
-    workflow_item = ensure_workflow_item(db, event)
+    bundle = _get_bundle(db, event.uuid)
+    assert bundle is not None
+    item = bundle["workflow_item"]
+    image_review = bundle["image_review"]
+    product = bundle["product"]
+    summary_review = bundle["summary_review"]
+    report_candidate = bundle["report_candidate"]
+    task = bundle["task"]
     return WorkflowItemResponse(
         uuid=event.uuid,
         title=event.title,
         country=event.country,
         severity=event.severity,
         event_status=event.status,
-        pool=workflow_item.current_pool,
+        pool=item.current_pool,
         imagery="已就绪" if (event.pre_image_path or event.post_image_path) else "待下载",
         quality=_quality_label(image_review),
-        inference=(task.status if task else "待创建"),
-        summary=_summary_label(product, summary_review),
-        report_candidate="已入候选" if report_candidate else "未入候选",
+        inference=task.status if task else "待创建",
+        summary=_summary_label(product, summary_review, report_candidate),
+        report_candidate=f"已入候选 {report_candidate.report_date}" if report_candidate else "未入候选",
+        pool_status=_pool_status_label(item.pool_status),
+        event_date=event.event_date,
+        latitude=event.latitude,
+        longitude=event.longitude,
+        selected_image_type=item.selected_image_type,
+        last_operator=item.last_operator,
         updated_at=event.updated_at,
     )
+
+
+def _detail_payload(db: Session, uuid: str) -> WorkflowItemDetailResponse:
+    bundle = _get_bundle(db, uuid)
+    if not bundle:
+        raise HTTPException(status_code=404, detail="事件不存在")
+    event = bundle["event"]
+    task = bundle["task"]
+    product = bundle["product"]
+    image_review = bundle["image_review"]
+    summary_review = bundle["summary_review"]
+    report_candidate = bundle["report_candidate"]
+    item = bundle["workflow_item"]
+    base = _item_payload(db, event)
+    return WorkflowItemDetailResponse(
+        **base.model_dump(),
+        category=event.category_name or event.category,
+        address=event.address,
+        detail_fetch_status=event.detail_fetch_status,
+        pre_image_path=event.pre_image_path,
+        post_image_path=event.post_image_path,
+        task_status=task.status if task else None,
+        task_progress_stage=task.progress_stage if task else None,
+        task_progress_message=task.progress_message if task else None,
+        task_failure_reason=(task.last_error_details or task.failure_reason) if task else None,
+        summary_text=product.summary if product else None,
+        summary_review_status=summary_review.summary_status if summary_review else None,
+        summary_review_reason=summary_review.rejected_reason if summary_review else None,
+        report_date=report_candidate.report_date if report_candidate else None,
+        report_ready=item.pool_status in {"ready_for_daily_report", "report_draft_ready", "report_published"},
+    )
+
+
+def _upsert_summary_review(
+    db: Session,
+    uuid: str,
+    approved: bool,
+    reason: str | None,
+    report_date: str | None,
+    operator: str,
+) -> None:
+    now = _now_ms()
+    product = db.query(Product).filter(Product.uuid == uuid).first()
+    if not product or not product.summary:
+        raise HTTPException(status_code=400, detail=f"{uuid} 当前没有可审核的摘要")
+
+    review = db.query(SummaryReview).filter(SummaryReview.uuid == uuid).first()
+    if not review:
+        review = SummaryReview(uuid=uuid, created_at=now, updated_at=now)
+        db.add(review)
+
+    review.summary_text = product.summary
+    review.summary_status = "approved" if approved else "rejected"
+    review.approved_by = operator if approved else None
+    review.approved_at = now if approved else None
+    review.rejected_reason = None if approved else reason
+    review.updated_at = now
+
+    existing_candidates = db.query(ReportCandidate).filter(ReportCandidate.uuid == uuid).all()
+    for candidate in existing_candidates:
+        candidate.included = 1 if approved else 0
+        candidate.report_date = report_date or candidate.report_date
+        candidate.approved_by = operator if approved else candidate.approved_by
+        candidate.approved_at = now if approved else candidate.approved_at
+        candidate.updated_at = now
+
+    if approved and not existing_candidates:
+        db.add(
+            ReportCandidate(
+                uuid=uuid,
+                report_date=report_date or date.today().isoformat(),
+                included=1,
+                approved_by=operator,
+                approved_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    item = db.query(WorkflowItem).filter(WorkflowItem.uuid == uuid).first()
+    if item:
+        item.current_pool = "summary_report_pool"
+        item.pool_status = "ready_for_daily_report" if approved else "summary_rejected"
+        item.last_operator = operator
+        item.updated_at = now
+        item.last_transition_at = now
+
+
+def _upsert_image_review(
+    db: Session,
+    uuid: str,
+    approved: bool,
+    image_type: str | None,
+    reason: str | None,
+    operator: str,
+) -> None:
+    now = _now_ms()
+    review = latest_image_review(db, uuid)
+    if not review:
+        review = ImageReview(
+            uuid=uuid,
+            selected_image_type=image_type or "post",
+            review_status="pending",
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(review)
+    review.selected_image_type = image_type or review.selected_image_type or "post"
+    review.human_decision = "approved" if approved else "rejected"
+    review.review_status = "approved" if approved else "rejected"
+    review.ai_reason = reason or review.ai_reason
+    review.reviewed_by = operator
+    review.reviewed_at = now
+    review.updated_at = now
+
+    item = db.query(WorkflowItem).filter(WorkflowItem.uuid == uuid).first()
+    if item:
+        item.current_pool = "inference_pool" if approved else "image_review_pool"
+        item.pool_status = "await_inference_trigger" if approved else "image_rejected"
+        item.selected_image_type = review.selected_image_type
+        item.last_operator = operator
+        item.updated_at = now
+        item.last_transition_at = now
 
 
 @router.get("/overview", response_model=WorkflowOverviewResponse)
@@ -82,13 +278,13 @@ def workflow_overview(
     db: Session = Depends(get_db),
     _=Depends(get_current_admin),
 ):
-    sync_workflow_projection(db)
+    _refresh_projection(db)
     descriptions = {
-        "event_pool": ("自动", "抓取事件、补经纬度、补详情、自动维护总列表"),
-        "imagery_pool": ("自动", "自动提交并跟踪 GEE 下载，不需要人工干预"),
-        "image_review_pool": ("手动", "Grok / 人工审核影像是否可进入推理"),
-        "inference_pool": ("手动", "确认后触发 Latest Model 推理"),
-        "summary_report_pool": ("手动", "摘要审核、日报候选、日报生成与发布"),
+        "event_pool": ("自动", "抓取事件、补坐标、补详情，自动维护总事件列表"),
+        "imagery_pool": ("自动", "自动提交并跟踪 GEE 影像下载，直到可进入审核"),
+        "image_review_pool": ("手动", "Grok / 人工审核影像质量，决定能否进入推理"),
+        "inference_pool": ("手动", "手动选择通过项，触发 Latest Model 推理"),
+        "summary_report_pool": ("手动", "手动生成摘要、审核摘要、推入日报候选并生成日报"),
     }
     cards = []
     for key, label in [
@@ -111,9 +307,10 @@ def workflow_overview(
         )
     return WorkflowOverviewResponse(
         cards=cards,
-        scheduler_enabled=settings.ENABLE_SCHEDULER,
+        legacy_scheduler_enabled=settings.ENABLE_SCHEDULER,
         legacy_root=str(settings.LEGACY_ROOT),
         database_path=settings.DATABASE_PATH,
+        legacy_python=settings.LEGACY_PYTHON,
     )
 
 
@@ -124,16 +321,53 @@ def list_workflow_items(
     db: Session = Depends(get_db),
     _=Depends(get_current_admin),
 ):
-    sync_workflow_projection(db)
+    _refresh_projection(db)
     rows = (
         db.query(Event)
         .join(WorkflowItem, WorkflowItem.uuid == Event.uuid)
         .filter(WorkflowItem.current_pool == pool)
-        .order_by(Event.updated_at.desc())
+        .order_by(WorkflowItem.updated_at.desc(), Event.updated_at.desc())
         .limit(limit)
         .all()
     )
     return WorkflowItemListResponse(total=len(rows), data=[_item_payload(db, event) for event in rows])
+
+
+@router.get("/items/{uuid}", response_model=WorkflowItemDetailResponse)
+def get_workflow_item_detail(
+    uuid: str,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    _refresh_projection(db)
+    return _detail_payload(db, uuid)
+
+
+@router.get("/report-candidates", response_model=ReportCandidateListResponse)
+def list_report_candidates(
+    report_date: str = Query(...),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    rows = (
+        db.query(ReportCandidate, Event)
+        .join(Event, Event.uuid == ReportCandidate.uuid)
+        .filter(ReportCandidate.report_date == report_date, ReportCandidate.included == 1)
+        .order_by(ReportCandidate.updated_at.desc())
+        .all()
+    )
+    data = [
+        ReportCandidateResponse(
+            uuid=event.uuid,
+            title=event.title,
+            country=event.country,
+            severity=event.severity,
+            report_date=candidate.report_date,
+            updated_at=event.updated_at,
+        )
+        for candidate, event in rows
+    ]
+    return ReportCandidateListResponse(total=len(data), data=data)
 
 
 @router.post("/items/{uuid}/reset-inference", response_model=ResetResponse)
@@ -145,7 +379,19 @@ def reset_item_inference(
     affected = reset_inference_content(db, uuid)
     if affected == 0:
         raise HTTPException(status_code=404, detail="未找到可重置的推理/摘要内容")
-    return ResetResponse(message="已清空成品与推理阶段内容", affected=affected)
+    _refresh_projection(db)
+    return ResetResponse(message="已清空成品与推理/摘要阶段内容", affected=affected)
+
+
+@router.post("/items/batch-reset-inference", response_model=ResetResponse)
+def batch_reset_inference(
+    req: BatchUuidRequest,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    affected = reset_all_inference_stage(db, req.uuids)
+    _refresh_projection(db)
+    return ResetResponse(message="已批量重置所选推理/摘要阶段内容", affected=affected)
 
 
 @router.post("/reset-inference-all", response_model=ResetResponse)
@@ -154,6 +400,7 @@ def reset_inference_all(
     _=Depends(get_current_admin),
 ):
     affected = reset_all_inference_stage(db)
+    _refresh_projection(db)
     return ResetResponse(message="已批量重置所有推理/摘要阶段内容", affected=affected)
 
 
@@ -164,38 +411,81 @@ def decide_image_review(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    now = _now_ms()
-    review = (
-        db.query(ImageReview)
-        .filter(ImageReview.uuid == uuid)
-        .order_by(ImageReview.updated_at.desc(), ImageReview.id.desc())
-        .first()
-    )
-    if not review:
-        review = ImageReview(
-            uuid=uuid,
-            selected_image_type=req.image_type or "post",
-            review_status="pending",
-            created_at=now,
-            updated_at=now,
-        )
-        db.add(review)
-    review.selected_image_type = req.image_type or review.selected_image_type or "post"
-    review.human_decision = "approved" if req.approved else "rejected"
-    review.review_status = "approved" if req.approved else "rejected"
-    review.ai_reason = req.reason or review.ai_reason
-    review.reviewed_by = admin.username
-    review.reviewed_at = now
-    review.updated_at = now
-
-    item = db.query(WorkflowItem).filter(WorkflowItem.uuid == uuid).first()
-    if item:
-        item.current_pool = "inference_pool" if req.approved else "image_review_pool"
-        item.pool_status = "ready"
-        item.last_operator = admin.username
-        item.updated_at = now
+    _upsert_image_review(db, uuid, req.approved, req.image_type, req.reason, admin.username)
     db.commit()
+    _refresh_projection(db)
     return ResetResponse(message="影像审核结果已写入", affected=1)
+
+
+@router.post("/items/batch-image-review", response_model=ResetResponse)
+def batch_image_review(
+    req: BatchImageReviewRequest,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    if not req.uuids:
+        raise HTTPException(status_code=400, detail="请选择至少一条事件")
+    for uuid in req.uuids:
+        _upsert_image_review(db, uuid, req.approved, req.image_type, req.reason, admin.username)
+    db.commit()
+    _refresh_projection(db)
+    return ResetResponse(message="已批量写入影像审核结果", affected=len(req.uuids))
+
+
+@router.post("/items/{uuid}/trigger-inference", response_model=ResetResponse)
+def trigger_inference(
+    uuid: str,
+    req: InferenceTriggerRequest,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    _ = db
+    result = run_legacy_action("trigger_inference", {"uuid": uuid, "selected_image_type": req.selected_image_type})
+    _refresh_projection(db)
+    return ResetResponse(
+        message=f"已触发推理，事件状态 {result.get('event_status') or '-'}，任务状态 {result.get('task_status') or '-'}",
+        affected=1,
+    )
+
+
+@router.post("/items/batch-trigger-inference", response_model=ResetResponse)
+def batch_trigger_inference(
+    req: BatchInferenceTriggerRequest,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    if not req.uuids:
+        raise HTTPException(status_code=400, detail="请选择至少一条事件")
+    for uuid in req.uuids:
+        run_legacy_action("trigger_inference", {"uuid": uuid, "selected_image_type": req.selected_image_type})
+    _refresh_projection(db)
+    return ResetResponse(message="已批量触发推理", affected=len(req.uuids))
+
+
+@router.post("/items/{uuid}/generate-summary", response_model=ResetResponse)
+def generate_summary(
+    uuid: str,
+    req: SummaryGenerateRequest,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    run_legacy_action("generate_summary", {"uuid": uuid, "persist": req.persist})
+    _refresh_projection(db)
+    return ResetResponse(message="摘要已生成并写回数据库", affected=1)
+
+
+@router.post("/items/batch-generate-summary", response_model=ResetResponse)
+def batch_generate_summary(
+    req: BatchSummaryGenerateRequest,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    if not req.uuids:
+        raise HTTPException(status_code=400, detail="请选择至少一条事件")
+    for uuid in req.uuids:
+        run_legacy_action("generate_summary", {"uuid": uuid, "persist": req.persist})
+    _refresh_projection(db)
+    return ResetResponse(message="已批量生成摘要", affected=len(req.uuids))
 
 
 @router.post("/items/{uuid}/summary-approval", response_model=ResetResponse)
@@ -205,39 +495,43 @@ def approve_summary(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    now = _now_ms()
-    product = db.query(Product).filter(Product.uuid == uuid).first()
-    if not product or not product.summary:
-        raise HTTPException(status_code=400, detail="当前没有可审核的摘要")
-
-    review = db.query(SummaryReview).filter(SummaryReview.uuid == uuid).first()
-    if not review:
-        review = SummaryReview(uuid=uuid, created_at=now, updated_at=now)
-        db.add(review)
-    review.summary_text = product.summary
-    review.summary_status = "approved" if req.approved else "rejected"
-    review.approved_by = admin.username if req.approved else None
-    review.approved_at = now if req.approved else None
-    review.rejected_reason = None if req.approved else req.reason
-    review.updated_at = now
-
-    if req.approved:
-        candidate = ReportCandidate(
-            uuid=uuid,
-            report_date=req.report_date or date.today().isoformat(),
-            included=1,
-            approved_by=admin.username,
-            approved_at=now,
-            created_at=now,
-            updated_at=now,
-        )
-        db.add(candidate)
-
-    item = db.query(WorkflowItem).filter(WorkflowItem.uuid == uuid).first()
-    if item:
-        item.current_pool = "summary_report_pool"
-        item.pool_status = "approved" if req.approved else "rejected"
-        item.last_operator = admin.username
-        item.updated_at = now
+    _upsert_summary_review(db, uuid, req.approved, req.reason, req.report_date, admin.username)
     db.commit()
+    _refresh_projection(db)
     return ResetResponse(message="摘要审核结果已更新", affected=1)
+
+
+@router.post("/items/batch-summary-approval", response_model=ResetResponse)
+def batch_summary_approval(
+    req: BatchSummaryApprovalRequest,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    if not req.uuids:
+        raise HTTPException(status_code=400, detail="请选择至少一条事件")
+    for uuid in req.uuids:
+        _upsert_summary_review(db, uuid, req.approved, req.reason, req.report_date, admin.username)
+    db.commit()
+    _refresh_projection(db)
+    return ResetResponse(message="已批量更新摘要审核结果", affected=len(req.uuids))
+
+
+@router.post("/reports/generate", response_model=ReportGenerateResponse)
+def generate_report(
+    req: ReportGenerateRequest,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    _ = db
+    result = run_legacy_action(
+        "generate_candidate_report",
+        {"report_date": req.report_date, "database_path": settings.DATABASE_PATH},
+    )
+    _refresh_projection(db)
+    return ReportGenerateResponse(
+        message="已按日报候选池生成日报草稿",
+        report_date=result["report_date"],
+        report_title=result.get("report_title"),
+        event_count=result.get("event_count", 0),
+        published=bool(result.get("published")),
+    )

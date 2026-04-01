@@ -26,9 +26,10 @@ class WorkflowOverviewCard(BaseModel):
 
 class WorkflowOverviewResponse(BaseModel):
     cards: List[WorkflowOverviewCard]
-    scheduler_enabled: bool
+    legacy_scheduler_enabled: bool
     legacy_root: str
     database_path: str
+    legacy_python: str
 
 
 class WorkflowItemResponse(BaseModel):
@@ -43,12 +44,35 @@ class WorkflowItemResponse(BaseModel):
     inference: str
     summary: str
     report_candidate: str
+    pool_status: str
+    event_date: Optional[int]
+    latitude: Optional[float]
+    longitude: Optional[float]
+    selected_image_type: Optional[str]
+    last_operator: Optional[str]
     updated_at: Optional[int]
 
 
 class WorkflowItemListResponse(BaseModel):
     total: int
     data: List[WorkflowItemResponse]
+
+
+class WorkflowItemDetailResponse(WorkflowItemResponse):
+    category: Optional[str]
+    address: Optional[str]
+    detail_fetch_status: Optional[str]
+    pre_image_path: Optional[str]
+    post_image_path: Optional[str]
+    task_status: Optional[str]
+    task_progress_stage: Optional[str]
+    task_progress_message: Optional[str]
+    task_failure_reason: Optional[str]
+    summary_text: Optional[str]
+    summary_review_status: Optional[str]
+    summary_review_reason: Optional[str]
+    report_date: Optional[str]
+    report_ready: bool
 
 
 class ResetResponse(BaseModel):
@@ -66,3 +90,65 @@ class ImageReviewDecisionRequest(BaseModel):
     approved: bool
     image_type: Optional[str] = None
     reason: Optional[str] = None
+
+
+class BatchUuidRequest(BaseModel):
+    uuids: List[str]
+
+
+class BatchImageReviewRequest(BaseModel):
+    uuids: List[str]
+    approved: bool
+    image_type: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class BatchSummaryApprovalRequest(BaseModel):
+    uuids: List[str]
+    approved: bool
+    reason: Optional[str] = None
+    report_date: Optional[str] = None
+
+
+class InferenceTriggerRequest(BaseModel):
+    selected_image_type: Optional[str] = None
+
+
+class BatchInferenceTriggerRequest(BaseModel):
+    uuids: List[str]
+    selected_image_type: Optional[str] = None
+
+
+class SummaryGenerateRequest(BaseModel):
+    persist: bool = True
+
+
+class BatchSummaryGenerateRequest(BaseModel):
+    uuids: List[str]
+    persist: bool = True
+
+
+class ReportGenerateRequest(BaseModel):
+    report_date: str
+
+
+class ReportCandidateResponse(BaseModel):
+    uuid: str
+    title: Optional[str]
+    country: Optional[str]
+    severity: Optional[str]
+    report_date: str
+    updated_at: Optional[int]
+
+
+class ReportCandidateListResponse(BaseModel):
+    total: int
+    data: List[ReportCandidateResponse]
+
+
+class ReportGenerateResponse(BaseModel):
+    message: str
+    report_date: str
+    report_title: Optional[str]
+    event_count: int
+    published: bool
