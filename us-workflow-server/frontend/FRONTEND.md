@@ -40,13 +40,13 @@
 
 ```bash
 # 安装依赖
-npm install
+pnpm install
 
 # 启动开发服务器（需要后端运行在 2335 端口）
-npm run dev
+pnpm dev
 
 # 类型检查
-npm run build
+pnpm build
 ```
 
 开发服务器会在 http://localhost:5173 启动，并自动代理 `/api` 到后端服务器。
@@ -55,7 +55,7 @@ npm run build
 
 ```bash
 # 生产构建
-npm run build
+pnpm build
 
 # 构建输出在 dist/ 目录
 ```
@@ -101,13 +101,13 @@ src/
 ## 环境要求
 
 - Node.js >= 18
-- npm >= 9
+- pnpm >= 10
 
 ## 部署
 
 前端构建后集成到后端服务器，无需单独部署：
 
-1. 构建前端: `npm run build`
+1. 构建前端: `pnpm build`
 2. 启动后端: `cd .. && python main.py`
 3. 访问: http://127.0.0.1:2335
 

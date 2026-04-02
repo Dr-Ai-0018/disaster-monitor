@@ -81,7 +81,7 @@ if frontend_dist.exists():
 else:
     @app.get("/", include_in_schema=False)
     def no_frontend():
-        return {"message": "Frontend not built. Run: cd frontend && npm run build"}
+        return {"message": "Frontend not built. Run: cd frontend && pnpm build"}
 
 
 if __name__ == "__main__":

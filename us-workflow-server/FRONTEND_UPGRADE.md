@@ -137,12 +137,12 @@ frontend/
 1. 安装依赖:
 ```bash
 cd frontend
-npm install
+pnpm install
 ```
 
 2. 启动开发服务器（需要后端运行在 2335 端口）:
 ```bash
-npm run dev
+pnpm dev
 ```
 
 访问 http://localhost:5173
@@ -152,7 +152,7 @@ npm run dev
 1. 构建前端:
 ```bash
 cd frontend
-npm run build
+pnpm build
 ```
 
 2. 启动后端服务器:
@@ -184,7 +184,7 @@ def serve_spa(full_path: str):
     if index_path.exists():
         return FileResponse(str(index_path))
     
-    return {"message": "Frontend not built. Run: cd frontend && npm run build"}
+    return {"message": "Frontend not built. Run: cd frontend && pnpm build"}
 ```
 
 ## UI 设计特点
