@@ -1,10 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button } from '../components/ui/button'
-import { Input } from '../components/ui/input'
-import { Card } from '../components/ui/card'
 import { authApi } from '../lib/api'
-import { Globe, Lock, User, AlertCircle, ArrowRight, Shield, Activity, Database } from 'lucide-react'
+import { Shield, AlertCircle, Loader2 } from 'lucide-react'
 
 export function Login() {
   const [username, setUsername] = useState('')
@@ -17,171 +14,126 @@ export function Login() {
     e.preventDefault()
     setError('')
     setLoading(true)
-
     try {
       const response = await authApi.login(username, password)
       localStorage.setItem('token', response.access_token)
-      navigate('/')
+      navigate('/dashboard')
     } catch (err: any) {
-      setError(err.response?.data?.detail || '登录失败，请检查用户名和密码')
+      setError(err.response?.data?.detail || '用户名或密码不正确')
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
-      {/* Left Panel - Branding */}
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 p-12 flex-col justify-between relative overflow-hidden">
-        {/* Animated Background Pattern */}
-        <div className="absolute inset-0 opacity-10">
-          <div className="absolute top-0 -left-4 w-72 h-72 bg-white rounded-full mix-blend-multiply filter blur-xl animate-blob"></div>
-          <div className="absolute top-0 -right-4 w-72 h-72 bg-blue-300 rounded-full mix-blend-multiply filter blur-xl animate-blob animation-delay-2000"></div>
-          <div className="absolute -bottom-8 left-20 w-72 h-72 bg-indigo-300 rounded-full mix-blend-multiply filter blur-xl animate-blob animation-delay-4000"></div>
+    <div className="flex min-h-screen">
+      <div className="hidden lg:flex lg:w-2/5 bg-slate-900 flex-col justify-between p-12">
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded bg-blue-600 flex items-center justify-center">
+            <Shield className="h-5 w-5 text-white" />
+          </div>
+          <span className="text-white font-semibold text-base">灾害监测后台</span>
         </div>
 
-        <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-8">
-            <div className="h-12 w-12 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
-              <Globe className="h-7 w-7 text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-white">灾害监测平台</h1>
-              <p className="text-blue-100 text-sm">Disaster Monitor</p>
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">处理流程</div>
+            <div className="space-y-3 pt-2">
+              {[
+                { step: '01', label: '事件接入', desc: '自动采集全球灾害事件数据' },
+                { step: '02', label: '影像审核', desc: '遥感影像质量人工复核' },
+                { step: '03', label: '影像分析', desc: '触发分析，生成处置成果' },
+                { step: '04', label: '摘要复核', desc: '内容审核，确认后纳入日报' },
+                { step: '05', label: '日报发布', desc: '生成并发布每日报告' },
+              ].map(item => (
+                <div key={item.step} className="flex items-start gap-3">
+                  <span className="text-xs font-mono text-blue-500 w-5 flex-shrink-0 mt-0.5">{item.step}</span>
+                  <div>
+                    <div className="text-sm font-medium text-slate-200">{item.label}</div>
+                    <div className="text-xs text-slate-500">{item.desc}</div>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
 
-        <div className="relative z-10 space-y-6">
-          <h2 className="text-4xl font-bold text-white leading-tight">
-            智能灾害监测<br />工作流管理系统
-          </h2>
-          <p className="text-blue-100 text-lg leading-relaxed">
-            集成 RSOE 实时监测、GEE 影像分析、AI 质检推理、Gemini 智能摘要的全流程灾害应急响应平台
-          </p>
-          
-          <div className="grid grid-cols-2 gap-4 pt-8">
-            <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 border border-white/20">
-              <Activity className="h-6 w-6 text-white mb-2" />
-              <div className="text-white font-semibold">实时监测</div>
-              <div className="text-blue-100 text-sm">24/7 全球灾害追踪</div>
-            </div>
-            <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 border border-white/20">
-              <Database className="h-6 w-6 text-white mb-2" />
-              <div className="text-white font-semibold">五池工作流</div>
-              <div className="text-blue-100 text-sm">自动化处理流程</div>
-            </div>
-            <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 border border-white/20">
-              <Shield className="h-6 w-6 text-white mb-2" />
-              <div className="text-white font-semibold">AI 推理</div>
-              <div className="text-blue-100 text-sm">智能分析与预测</div>
-            </div>
-            <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 border border-white/20">
-              <Globe className="h-6 w-6 text-white mb-2" />
-              <div className="text-white font-semibold">全球覆盖</div>
-              <div className="text-blue-100 text-sm">多源数据融合</div>
-            </div>
-          </div>
-        </div>
-
-        <div className="relative z-10 text-blue-100 text-sm">
-          © 2024 Disaster Monitor. Enterprise Edition.
-        </div>
+        <div className="text-xs text-slate-600">内部运营系统 · 仅限授权人员访问</div>
       </div>
 
-      {/* Right Panel - Login Form */}
-      <div className="flex-1 flex items-center justify-center p-8">
-        <div className="w-full max-w-md">
-          {/* Mobile Logo */}
-          <div className="lg:hidden flex items-center gap-3 mb-8">
-            <div className="h-12 w-12 rounded-xl bg-blue-600 flex items-center justify-center">
-              <Globe className="h-7 w-7 text-white" />
+      <div className="flex-1 flex items-center justify-center bg-slate-50 px-6 py-12">
+        <div className="w-full max-w-sm">
+          <div className="lg:hidden flex items-center gap-2 mb-10">
+            <div className="h-8 w-8 rounded bg-blue-700 flex items-center justify-center">
+              <Shield className="h-4 w-4 text-white" />
             </div>
+            <span className="text-slate-900 font-semibold">灾害监测后台</span>
+          </div>
+
+          <div className="mb-8">
+            <h1 className="text-2xl font-bold text-slate-900">登录</h1>
+            <p className="text-sm text-slate-500 mt-1">请使用分配的账户凭据登录</p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <h1 className="text-2xl font-bold text-slate-900">灾害监测平台</h1>
-              <p className="text-slate-600 text-sm">Disaster Monitor</p>
+              <label htmlFor="username" className="block text-sm font-medium text-slate-700 mb-1.5">
+                用户名
+              </label>
+              <input
+                id="username"
+                type="text"
+                autoComplete="username"
+                value={username}
+                onChange={e => setUsername(e.target.value)}
+                disabled={loading}
+                required
+                className="w-full h-10 px-3 text-sm border border-slate-300 rounded-md bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent disabled:bg-slate-100 disabled:cursor-not-allowed transition"
+                placeholder="输入用户名"
+              />
             </div>
-          </div>
 
-          <Card className="border-slate-200 shadow-xl">
-            <div className="p-8">
-              <div className="mb-8">
-                <h2 className="text-3xl font-bold text-slate-900 mb-2">欢迎回来</h2>
-                <p className="text-slate-600">登录您的账户以访问工作流管理系统</p>
-              </div>
-
-              <form onSubmit={handleSubmit} className="space-y-6">
-                <div className="space-y-2">
-                  <label htmlFor="username" className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-                    <User className="h-4 w-4" />
-                    用户名
-                  </label>
-                  <Input
-                    id="username"
-                    type="text"
-                    placeholder="请输入用户名"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    disabled={loading}
-                    required
-                    className="h-12 text-base"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label htmlFor="password" className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-                    <Lock className="h-4 w-4" />
-                    密码
-                  </label>
-                  <Input
-                    id="password"
-                    type="password"
-                    placeholder="请输入密码"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    disabled={loading}
-                    required
-                    className="h-12 text-base"
-                  />
-                </div>
-
-                {error && (
-                  <div className="flex items-start gap-3 rounded-lg bg-red-50 border border-red-200 p-4">
-                    <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
-                    <div className="text-sm text-red-800">{error}</div>
-                  </div>
-                )}
-
-                <Button
-                  type="submit"
-                  className="w-full h-12 text-base font-semibold bg-blue-600 hover:bg-blue-700"
-                  disabled={loading}
-                >
-                  {loading ? (
-                    <span className="flex items-center gap-2">
-                      <div className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      登录中...
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-2">
-                      登录
-                      <ArrowRight className="h-5 w-5" />
-                    </span>
-                  )}
-                </Button>
-              </form>
-
-              <div className="mt-8 pt-6 border-t border-slate-200">
-                <div className="text-center text-sm text-slate-600">
-                  需要帮助？请联系系统管理员
-                </div>
-              </div>
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-1.5">
+                密码
+              </label>
+              <input
+                id="password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                disabled={loading}
+                required
+                className="w-full h-10 px-3 text-sm border border-slate-300 rounded-md bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent disabled:bg-slate-100 disabled:cursor-not-allowed transition"
+                placeholder="输入密码"
+              />
             </div>
-          </Card>
 
-          <div className="mt-8 text-center text-sm text-slate-500">
-            <p>使用本系统即表示您同意我们的服务条款和隐私政策</p>
-          </div>
+            {error && (
+              <div className="flex items-start gap-2.5 rounded-md bg-red-50 border border-red-200 px-3 py-3">
+                <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0 mt-0.5" />
+                <span className="text-sm text-red-700">{error}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full h-10 bg-blue-700 hover:bg-blue-800 disabled:bg-blue-400 text-white text-sm font-semibold rounded-md transition-colors flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  登录中
+                </>
+              ) : '登录'}
+            </button>
+          </form>
+
+          <p className="mt-8 text-center text-xs text-slate-400">
+            如需帮助，请联系管理员
+          </p>
         </div>
       </div>
     </div>
