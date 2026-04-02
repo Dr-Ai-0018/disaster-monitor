@@ -49,8 +49,19 @@ class Settings:
 
         database_url = os.getenv("DATABASE_URL", "").strip()
         if database_url:
-            self.DATABASE_URL = database_url
-            self.DATABASE_PATH = database_url.replace("sqlite:///", "")
+            if database_url.startswith("sqlite:///"):
+                raw_path = database_url[len("sqlite:///"):]
+                db_path = Path(raw_path)
+                if not db_path.is_absolute():
+                    # Legacy env files often use a repo-relative sqlite path like
+                    # `sqlite:///database/disaster.db`; resolve it against the
+                    # legacy server root instead of the workflow server cwd.
+                    db_path = (self.LEGACY_ROOT / db_path).resolve()
+                self.DATABASE_PATH = str(db_path)
+                self.DATABASE_URL = "sqlite:///" + self.DATABASE_PATH
+            else:
+                self.DATABASE_URL = database_url
+                self.DATABASE_PATH = database_url.replace("sqlite:///", "")
         else:
             self.DATABASE_PATH = str((self.LEGACY_ROOT / "database" / "disaster.db").resolve())
             self.DATABASE_URL = "sqlite:///" + self.DATABASE_PATH
