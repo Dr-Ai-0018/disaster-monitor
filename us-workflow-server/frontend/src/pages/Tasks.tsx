@@ -15,7 +15,7 @@ import { cn } from '../lib/utils'
 const PAGE_SIZE = 50
 
 const STAGES = [
-  { key: 'event_pool',          label: '全部事件',  short: '事件' },
+  { key: 'event_pool',          label: '新进事件',  short: '新进' },
   { key: 'imagery_pool',        label: '影像准备',  short: '影像' },
   { key: 'image_review_pool',   label: '待审核',    short: '审核' },
   { key: 'inference_pool',      label: '待分析',    short: '分析' },
@@ -463,6 +463,8 @@ export function Tasks() {
   const getCount = (key: string) =>
     overview?.cards.find(c => c.key === key)?.total ?? 0
 
+  const systemTotal = overview?.cards.reduce((sum, card) => sum + card.total, 0) ?? 0
+
   const allChecked = items.length > 0 && selected.size === items.length
   const someChecked = selected.size > 0 && selected.size < items.length
   const allPoolSelected = total > 0 && selected.size === total
@@ -534,6 +536,15 @@ export function Tasks() {
               )
             })}
           </nav>
+        </div>
+
+        <div className="flex items-center justify-between text-xs text-slate-400">
+          <span>
+            当前池为 {STAGES.find(stage => stage.key === currentPool)?.label ?? currentPool}，系统总量 {systemTotal} 条
+          </span>
+          {currentPool === 'event_pool' && (
+            <span>这里显示的是新进事件池，不是全部存量</span>
+          )}
         </div>
 
         <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
