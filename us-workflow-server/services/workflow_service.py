@@ -30,6 +30,33 @@ def _now_ms() -> int:
     return int(datetime.now(timezone.utc).timestamp() * 1000)
 
 
+def _has_real_imagery(event: Event) -> bool:
+    return bool((event.pre_image_path and str(event.pre_image_path).strip()) or (event.post_image_path and str(event.post_image_path).strip()))
+
+
+def _is_placeholder_inference(task: Optional[TaskQueue], product: Optional[Product]) -> bool:
+    if task and task.progress_message and "无可用影像" in task.progress_message:
+        return True
+
+    payload = product.inference_result if product and product.inference_result else None
+    if not payload:
+        return False
+
+    try:
+        parsed = json.loads(payload)
+    except json.JSONDecodeError:
+        return "NO_IMAGE" in payload or "no usable imagery" in payload.lower()
+
+    if isinstance(parsed, dict):
+        if "00_NO_IMAGE" in parsed:
+            return True
+        for value in parsed.values():
+            if isinstance(value, dict) and str(value.get("type") or "").upper() == "NO_IMAGE":
+                return True
+
+    return False
+
+
 def mark_projection_dirty() -> None:
     with _PROJECTION_LOCK:
         _PROJECTION_STATE["dirty"] = True
@@ -237,6 +264,14 @@ def derive_workflow_state(
 
     has_any_image = bool(event.pre_image_path or event.post_image_path)
     if not has_any_image:
+        if event.status == "pool":
+            return {
+                "current_pool": "imagery_pool",
+                "pool_status": "await_imagery_preparation",
+                "auto_stage": "imagery_download",
+                "manual_stage": "image_review",
+                "selected_image_type": selected_image_type,
+            }
         return state
 
     if not bool(event.quality_checked):
@@ -450,6 +485,247 @@ def reset_inference_content(db: Session, uuid: str) -> int:
     db.commit()
     mark_projection_dirty()
     return affected
+
+
+def _delete_report_candidates(db: Session, uuid: str) -> int:
+    affected = 0
+    for row in db.query(ReportCandidate).filter(ReportCandidate.uuid == uuid).all():
+        db.delete(row)
+        affected += 1
+    return affected
+
+
+def _delete_image_reviews(db: Session, uuid: str) -> int:
+    affected = 0
+    for row in db.query(ImageReview).filter(ImageReview.uuid == uuid).all():
+        db.delete(row)
+        affected += 1
+    return affected
+
+
+def _delete_task_queue_row(db: Session, uuid: str) -> int:
+    task = db.query(TaskQueue).filter(TaskQueue.uuid == uuid).first()
+    if not task:
+        return 0
+    db.delete(task)
+    return 1
+
+
+def _delete_product_row(db: Session, uuid: str) -> int:
+    product = db.query(Product).filter(Product.uuid == uuid).first()
+    if not product:
+        return 0
+    db.delete(product)
+    return 1
+
+
+def _delete_summary_review_row(db: Session, uuid: str) -> int:
+    summary_review = db.query(SummaryReview).filter(SummaryReview.uuid == uuid).first()
+    if not summary_review:
+        return 0
+    db.delete(summary_review)
+    return 1
+
+
+def _clear_imagery_state(event: Event) -> None:
+    event.pre_image_path = None
+    event.pre_image_date = None
+    event.pre_image_downloaded = 0
+    event.pre_image_source = None
+    event.post_image_path = None
+    event.post_image_date = None
+    event.post_image_downloaded = 0
+    event.post_image_source = None
+    event.quality_score = None
+    event.quality_assessment = None
+    event.quality_checked = 0
+    event.quality_pass = 0
+    event.quality_check_time = None
+    event.pre_window_days = 7
+    event.pre_imagery_last_check = None
+    event.pre_imagery_exhausted = 0
+    event.post_window_days = 7
+    event.post_imagery_last_check = None
+    event.post_imagery_open = 1
+    event.imagery_check_count = 0
+
+
+def _set_workflow_item_state(
+    workflow_item: Optional[WorkflowItem],
+    *,
+    current_pool: str,
+    pool_status: str,
+    auto_stage: str,
+    manual_stage: str,
+    operator: Optional[str],
+    now: int,
+) -> None:
+    if not workflow_item:
+        return
+    workflow_item.current_pool = current_pool
+    workflow_item.pool_status = pool_status
+    workflow_item.auto_stage = auto_stage
+    workflow_item.manual_stage = manual_stage
+    workflow_item.selected_image_type = None
+    workflow_item.last_operator = operator
+    workflow_item.updated_at = now
+    workflow_item.last_transition_at = now
+
+
+def _rollback_to_target_pool(
+    db: Session,
+    uuid: str,
+    *,
+    target_pool: str,
+    operator: Optional[str] = None,
+    commit: bool = True,
+) -> dict:
+    now = _now_ms()
+    event = db.query(Event).filter(Event.uuid == uuid).first()
+    if not event:
+        raise ValueError(f"事件不存在: {uuid}")
+
+    workflow_item = db.query(WorkflowItem).filter(WorkflowItem.uuid == uuid).first()
+    if not workflow_item:
+        workflow_item = ensure_workflow_item(db, event)
+
+    requested_target = target_pool
+    if target_pool == "image_review_pool" and not _has_real_imagery(event):
+        target_pool = "imagery_pool"
+
+    before_pool = workflow_item.current_pool
+    before_status = workflow_item.pool_status
+    affected = 0
+
+    affected += _delete_report_candidates(db, uuid)
+    affected += _delete_summary_review_row(db, uuid)
+
+    if target_pool in {"image_review_pool", "imagery_pool", "event_pool", "inference_pool"}:
+        affected += _delete_product_row(db, uuid)
+        affected += _delete_task_queue_row(db, uuid)
+
+    if target_pool in {"image_review_pool", "imagery_pool", "event_pool"}:
+        affected += _delete_image_reviews(db, uuid)
+
+    if target_pool == "event_pool":
+        _clear_imagery_state(event)
+        event.status = "pending"
+        event.updated_at = now
+        _set_workflow_item_state(
+            workflow_item,
+            current_pool="event_pool",
+            pool_status="await_imagery",
+            auto_stage="event_ingest",
+            manual_stage="image_review",
+            operator=operator,
+            now=now,
+        )
+    elif target_pool == "imagery_pool":
+        _clear_imagery_state(event)
+        event.status = "pool"
+        event.updated_at = now
+        _set_workflow_item_state(
+            workflow_item,
+            current_pool="imagery_pool",
+            pool_status="await_imagery_preparation",
+            auto_stage="imagery_download",
+            manual_stage="image_review",
+            operator=operator,
+            now=now,
+        )
+    elif target_pool == "image_review_pool":
+        event.status = "checked"
+        event.updated_at = now
+        _set_workflow_item_state(
+            workflow_item,
+            current_pool="image_review_pool",
+            pool_status="await_image_review",
+            auto_stage="imagery_download",
+            manual_stage="image_review",
+            operator=operator,
+            now=now,
+        )
+    elif target_pool == "inference_pool":
+        event.status = "checked"
+        event.updated_at = now
+        _set_workflow_item_state(
+            workflow_item,
+            current_pool="inference_pool",
+            pool_status="await_inference_trigger",
+            auto_stage="imagery_download",
+            manual_stage="trigger_inference",
+            operator=operator,
+            now=now,
+        )
+    else:
+        raise ValueError(f"unsupported rollback target: {requested_target}")
+
+    if commit:
+        db.commit()
+        mark_projection_dirty()
+
+    return {
+        "uuid": uuid,
+        "affected": affected,
+        "before_pool": before_pool,
+        "before_status": before_status,
+        "after_pool": workflow_item.current_pool,
+        "after_status": workflow_item.pool_status,
+        "requested_target": requested_target,
+    }
+
+
+def rollback_to_previous_pool(
+    db: Session,
+    uuid: str,
+    *,
+    operator: Optional[str] = None,
+    commit: bool = True,
+) -> dict:
+    event = db.query(Event).filter(Event.uuid == uuid).first()
+    if not event:
+        raise ValueError(f"事件不存在: {uuid}")
+
+    workflow_item = db.query(WorkflowItem).filter(WorkflowItem.uuid == uuid).first()
+    current_pool = workflow_item.current_pool if workflow_item else derive_workflow_state(
+        event=event,
+        task=db.query(TaskQueue).filter(TaskQueue.uuid == uuid).first(),
+        product=db.query(Product).filter(Product.uuid == uuid).first(),
+        image_review=latest_image_review(db, uuid),
+        summary_review=db.query(SummaryReview).filter(SummaryReview.uuid == uuid).first(),
+        report_candidate=latest_report_candidate(db, uuid),
+        daily_report=None,
+    )["current_pool"]
+
+    if current_pool == "summary_report_pool":
+        target_pool = "inference_pool"
+    elif current_pool == "inference_pool":
+        target_pool = "image_review_pool"
+    elif current_pool == "image_review_pool":
+        target_pool = "imagery_pool"
+    elif current_pool == "imagery_pool":
+        target_pool = "event_pool"
+    else:
+        raise ValueError(f"{uuid} 当前池子 {current_pool} 不支持回退上一池")
+
+    return _rollback_to_target_pool(db, uuid, target_pool=target_pool, operator=operator, commit=commit)
+
+
+def rollback_to_reaudit_pool(
+    db: Session,
+    uuid: str,
+    *,
+    operator: Optional[str] = None,
+    commit: bool = True,
+) -> dict:
+    event = db.query(Event).filter(Event.uuid == uuid).first()
+    if not event:
+        raise ValueError(f"事件不存在: {uuid}")
+
+    task = db.query(TaskQueue).filter(TaskQueue.uuid == uuid).first()
+    product = db.query(Product).filter(Product.uuid == uuid).first()
+    target_pool = "imagery_pool" if (_is_placeholder_inference(task, product) or not _has_real_imagery(event)) else "image_review_pool"
+    return _rollback_to_target_pool(db, uuid, target_pool=target_pool, operator=operator, commit=commit)
 
 
 def reset_workflow_stage(db: Session, uuid: str, stage: str) -> int:

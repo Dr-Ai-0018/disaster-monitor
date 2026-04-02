@@ -12,6 +12,7 @@ from schemas.schemas import (
     BatchActionResponse,
     BatchImageReviewRequest,
     BatchInferenceTriggerRequest,
+    BatchPreviousPoolRollbackRequest,
     BatchStageResetRequest,
     BatchSummaryApprovalRequest,
     BatchSummaryGenerateRequest,
@@ -45,6 +46,7 @@ from services.workflow_service import (
     reset_all_inference_stage,
     reset_inference_content,
     reset_workflow_stage,
+    rollback_to_previous_pool,
     sync_workflow_projection_if_needed,
 )
 from utils.auth import get_current_admin
@@ -89,6 +91,7 @@ def _summary_label(product: Product | None, summary_review: SummaryReview | None
 def _pool_status_label(pool_status: str) -> str:
     mapping = {
         "await_imagery": "待影像",
+        "await_imagery_preparation": "待重新准备影像",
         "imagery_ready_pending_quality": "待质检归档",
         "await_image_review": "待影像审核",
         "image_rejected": "影像已打回",
@@ -348,6 +351,17 @@ def workflow_overview(
         automation_scope="事件抓取与影像准备",
         review_scope="审核、推理、摘要、日报",
     )
+
+
+def _pool_label(pool: str) -> str:
+    mapping = {
+        "event_pool": "事件接入池",
+        "imagery_pool": "影像准备池",
+        "image_review_pool": "影像审核池",
+        "inference_pool": "分析池",
+        "summary_report_pool": "摘要池",
+    }
+    return mapping.get(pool, pool)
 
 
 def _latest_by_uuid(rows):
@@ -611,6 +625,56 @@ def batch_reset_stage(
             results.append(BatchItemResult(uuid=uuid, ok=False, message=str(exc)))
     _invalidate_projection()
     return _batch_response(f"已处理批量阶段回退: {req.stage}", results)
+
+
+@router.post("/items/{uuid}/rollback-previous", response_model=ResetResponse)
+def rollback_item_previous_pool(
+    uuid: str,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    try:
+        result = rollback_to_previous_pool(db, uuid, operator=admin.username)
+    except ValueError as exc:
+        detail = str(exc)
+        if "不存在" in detail:
+            raise HTTPException(status_code=404, detail=detail) from exc
+        raise HTTPException(status_code=400, detail=detail) from exc
+
+    _invalidate_projection()
+    return ResetResponse(
+        message=f"已打回到{_pool_label(result['after_pool'])}",
+        affected=max(1, result["affected"]),
+    )
+
+
+@router.post("/items/batch-rollback-previous", response_model=BatchActionResponse)
+def batch_rollback_previous_pool(
+    req: BatchPreviousPoolRollbackRequest,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    if not req.uuids:
+        raise HTTPException(status_code=400, detail="请选择至少一条事件")
+
+    results: list[BatchItemResult] = []
+    for uuid in req.uuids:
+        try:
+            result = rollback_to_previous_pool(db, uuid, operator=admin.username)
+            results.append(
+                BatchItemResult(
+                    uuid=uuid,
+                    ok=True,
+                    message=f"已打回到{_pool_label(result['after_pool'])}",
+                )
+            )
+        except ValueError as exc:
+            results.append(BatchItemResult(uuid=uuid, ok=False, message=str(exc)))
+        except Exception as exc:
+            results.append(BatchItemResult(uuid=uuid, ok=False, message=str(exc)))
+
+    _invalidate_projection()
+    return _batch_response("已处理批量上一池回退", results)
 
 
 @router.post("/reset-inference-all", response_model=ResetResponse)

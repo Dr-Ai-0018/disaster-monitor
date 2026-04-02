@@ -87,6 +87,16 @@ export const workflowApi = {
     const { data } = await api.post('/workflow/items/batch-reset-stage', { uuids, stage })
     return data
   },
+
+  rollbackPrevious: async (uuid: string): Promise<{ message: string; affected: number }> => {
+    const { data } = await api.post(`/workflow/items/${uuid}/rollback-previous`)
+    return data
+  },
+
+  batchRollbackPrevious: async (uuids: string[]): Promise<BatchActionResponse> => {
+    const { data } = await api.post('/workflow/items/batch-rollback-previous', { uuids })
+    return data
+  },
   
   reviewImage: async (
     uuid: string, 

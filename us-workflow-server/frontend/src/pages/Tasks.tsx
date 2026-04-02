@@ -41,6 +41,7 @@ const SEVERITY_CLASS: Record<string, string> = {
 
 const STATUS_CLASS: Record<string, string> = {
   '待影像':        'bg-slate-100 text-slate-600',
+  '待重新准备影像':'bg-slate-100 text-slate-600',
   '待质检归档':    'bg-blue-50 text-blue-700',
   '待影像审核':    'bg-amber-50 text-amber-700',
   '影像已打回':    'bg-red-50 text-red-700',
@@ -59,6 +60,7 @@ const STATUS_CLASS: Record<string, string> = {
 }
 
 const STATUS_DISPLAY: Record<string, string> = {
+  '待重新准备影像': '待准备影像',
   '待触发推理': '待触发分析',
   '待执行推理': '分析排队中',
   '推理中':     '分析进行中',
@@ -193,6 +195,17 @@ export function Tasks() {
     setSelected(prev => prev.size === items.length ? new Set() : new Set(items.map(i => i.uuid)))
   }
 
+  const clearSelection = () => {
+    setSelected(new Set())
+  }
+
+  const rollbackLabelByPool: Record<string, string> = {
+    imagery_pool: '打回事件接入',
+    image_review_pool: '打回影像准备',
+    inference_pool: '打回待审核',
+    summary_report_pool: '打回待分析',
+  }
+
   const runBatch = async (action: string) => {
     const uuids = Array.from(selected)
     if (!uuids.length) return
@@ -204,9 +217,10 @@ export function Tasks() {
       generate_summary: '批量生成摘要',
       approve_summary: '批量通过摘要并加入日报',
       reset_inference: '批量重置分析/摘要',
+      rollback_previous: rollbackLabelByPool[currentPool] ? `批量${rollbackLabelByPool[currentPool]}` : '批量回退上一池',
     }
 
-    const dangerous = ['reject_image', 'reset_inference']
+    const dangerous = ['reject_image', 'reset_inference', 'rollback_previous']
     if (dangerous.includes(action)) {
       const ok = await confirm({
         title: actionLabels[action],
@@ -240,6 +254,9 @@ export function Tasks() {
           break
         case 'reset_inference':
           result = await workflowApi.batchResetInference(uuids)
+          break
+        case 'rollback_previous':
+          result = await workflowApi.batchRollbackPrevious(uuids)
           break
         default:
           return
@@ -309,12 +326,43 @@ export function Tasks() {
         </div>
 
         <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+          {items.length > 0 && (
+            <div className="px-4 py-2 border-b border-slate-100 bg-slate-50 flex items-center justify-between gap-3">
+              <div className="text-xs text-slate-500">
+                当前页 {items.length} 条，已选 {selected.size} 条
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={toggleAll}
+                  className="px-2.5 py-1 text-xs font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 transition-colors"
+                >
+                  {allChecked ? '取消本页全选' : '全选本页'}
+                </button>
+                <button
+                  onClick={clearSelection}
+                  disabled={selected.size === 0}
+                  className="px-2.5 py-1 text-xs font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-50 transition-colors"
+                >
+                  取消选择
+                </button>
+              </div>
+            </div>
+          )}
           {selected.size > 0 && (
             <div className="flex items-center justify-between px-4 py-2.5 bg-slate-800 border-b border-slate-700">
               <span className="text-sm font-semibold text-white">
                 已选择 {selected.size} 项
               </span>
               <div className="flex items-center gap-2 flex-wrap">
+                {rollbackLabelByPool[currentPool] && (
+                  <ActionBtn
+                    icon={RefreshCw}
+                    label={rollbackLabelByPool[currentPool]}
+                    variant="danger"
+                    loading={acting}
+                    onClick={() => runBatch('rollback_previous')}
+                  />
+                )}
                 {currentPool === 'image_review_pool' && (
                   <>
                     <ActionBtn

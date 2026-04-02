@@ -106,6 +106,10 @@ class BatchStageResetRequest(BaseModel):
     stage: str
 
 
+class BatchPreviousPoolRollbackRequest(BaseModel):
+    uuids: List[str]
+
+
 class BatchImageReviewRequest(BaseModel):
     uuids: List[str]
     approved: bool

@@ -20,6 +20,7 @@ const SEVERITY_CLASS: Record<string, string> = {
 }
 const STATUS_CLASS: Record<string, string> = {
   '待影像':        'bg-slate-100 text-slate-600',
+  '待重新准备影像':'bg-slate-100 text-slate-600',
   '待质检归档':    'bg-blue-50 text-blue-700',
   '待影像审核':    'bg-amber-50 text-amber-700',
   '影像已打回':    'bg-red-50 text-red-700',
@@ -38,6 +39,7 @@ const STATUS_CLASS: Record<string, string> = {
 }
 
 const STATUS_DISPLAY: Record<string, string> = {
+  '待重新准备影像': '待准备影像',
   '待触发推理': '待触发分析',
   '待执行推理': '分析排队中',
   '推理中':     '分析进行中',
@@ -198,6 +200,20 @@ export function ItemDetail() {
     })
   }
 
+  const handleRollbackPrevious = async () => {
+    const ok = await confirm({
+      title: '打回上一池',
+      message: '将清空当前阶段及下游相关状态，并把事件打回上一池。确认继续？',
+      confirmText: '确认打回',
+      danger: true,
+    })
+    if (!ok) return
+    run('rollback_previous', async () => {
+      await workflowApi.rollbackPrevious(uuid!)
+      toast.success('事件已打回上一池')
+    })
+  }
+
   const handleGenerateSummary = () =>
     run('generate_summary', async () => {
       await workflowApi.generateSummary(uuid!)
@@ -253,6 +269,7 @@ export function ItemDetail() {
   const isImageReview = item.pool === 'image_review_pool'
   const isInference  = item.pool === 'inference_pool'
   const isSummary    = item.pool === 'summary_report_pool'
+  const canRollbackPrevious = item.pool !== 'event_pool'
   const poolStatusDisplay = STATUS_DISPLAY[item.pool_status] ?? item.pool_status
 
   const POOL_LABEL: Record<string, string> = {
@@ -532,7 +549,35 @@ export function ItemDetail() {
 
             {!isImageReview && !isInference && !isSummary && (
               <div className="bg-white rounded-lg border border-slate-200 p-5 text-center">
-                <p className="text-xs text-slate-400">当前阶段无需人工操作</p>
+                {canRollbackPrevious ? (
+                  <div className="space-y-3">
+                    <p className="text-xs text-slate-400">当前阶段暂无直接处理动作</p>
+                    <ActionBtn
+                      icon={RotateCcw}
+                      label="打回上一池"
+                      variant="danger"
+                      loading={acting === 'rollback_previous'}
+                      onClick={handleRollbackPrevious}
+                      fullWidth
+                    />
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-400">当前阶段无需人工操作</p>
+                )}
+              </div>
+            )}
+
+            {(isImageReview || isInference || isSummary) && (
+              <div className="bg-white rounded-lg border border-slate-200 p-5">
+                <p className="text-xs text-slate-400 mb-3">池子回退</p>
+                <ActionBtn
+                  icon={RotateCcw}
+                  label="打回上一池"
+                  variant="danger"
+                  loading={acting === 'rollback_previous'}
+                  onClick={handleRollbackPrevious}
+                  fullWidth
+                />
               </div>
             )}
           </div>
