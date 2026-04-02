@@ -220,6 +220,29 @@ class ReportCandidate(Base):
     updated_at = Column(Integer, nullable=False)
 
 
+class WorkflowBatchJob(Base):
+    __tablename__ = "workflow_batch_jobs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    action = Column(Text, nullable=False)
+    target_pool = Column(Text, nullable=False)
+    status = Column(Text, nullable=False, default="queued")
+    progress_total = Column(Integer, nullable=False, default=0)
+    progress_completed = Column(Integer, nullable=False, default=0)
+    progress_succeeded = Column(Integer, nullable=False, default=0)
+    progress_failed = Column(Integer, nullable=False, default=0)
+    progress_message = Column(Text)
+    cancel_requested = Column(Integer, nullable=False, default=0)
+    params_json = Column(Text)
+    result_json = Column(Text)
+    error_message = Column(Text)
+    created_by = Column(Text)
+    created_at = Column(Integer, nullable=False)
+    started_at = Column(Integer)
+    finished_at = Column(Integer)
+    updated_at = Column(Integer, nullable=False)
+
+
 _engine = None
 _SessionLocal = None
 

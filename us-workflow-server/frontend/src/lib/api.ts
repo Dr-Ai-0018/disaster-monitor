@@ -3,6 +3,7 @@ import type {
   WorkflowOverview, 
   WorkflowItemListResult,
   WorkflowItemDetail,
+  WorkflowBatchJob,
   ReportCandidate,
   DailyReport,
   LoginResponse,
@@ -65,6 +66,21 @@ export const workflowApi = {
 
   getItemSelection: async (pool: string): Promise<{ total: number; uuids: string[] }> => {
     const { data } = await api.get('/workflow/items/selection', { params: { pool } })
+    return data
+  },
+
+  createPoolActionJob: async (action: string, pool: string): Promise<WorkflowBatchJob> => {
+    const { data } = await api.post('/workflow/pool-actions', { action, pool })
+    return data
+  },
+
+  getBatchJob: async (jobId: number): Promise<WorkflowBatchJob> => {
+    const { data } = await api.get(`/workflow/batch-jobs/${jobId}`)
+    return data
+  },
+
+  cancelBatchJob: async (jobId: number): Promise<WorkflowBatchJob> => {
+    const { data } = await api.post(`/workflow/batch-jobs/${jobId}/cancel`)
     return data
   },
   

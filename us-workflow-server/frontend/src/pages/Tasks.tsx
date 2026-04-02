@@ -4,11 +4,11 @@ import { Layout } from '../components/Layout'
 import { workflowApi } from '../lib/api'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ConfirmDialog'
-import type { WorkflowItem, WorkflowOverview, BatchActionResponse } from '../types'
+import type { WorkflowItem, WorkflowOverview, BatchActionResponse, WorkflowBatchJob } from '../types'
 import { formatDate } from '../lib/utils'
 import {
   RefreshCw, Eye, CheckCircle, XCircle, Zap, FileText,
-  AlertCircle, Loader2, X,
+  AlertCircle, Loader2, RotateCcw, X,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 
@@ -132,6 +132,124 @@ function BatchResultModal({
   )
 }
 
+function BatchJobModal({
+  job,
+  onClose,
+  onCancel,
+}: {
+  job: WorkflowBatchJob
+  onClose: () => void
+  onCancel: () => void
+}) {
+  const percent = job.progress_total > 0
+    ? Math.min(100, Math.round((job.progress_completed / job.progress_total) * 100))
+    : 100
+  const running = ['queued', 'running', 'cancelling'].includes(job.status)
+
+  const statusLabel: Record<string, string> = {
+    queued: '排队中',
+    running: '执行中',
+    cancelling: '取消中',
+    cancelled: '已取消',
+    completed: '已完成',
+    failed: '失败',
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 fade-in"
+      style={{ background: 'rgba(15,23,42,0.5)' }}
+      onClick={running ? undefined : onClose}
+    >
+      <div
+        className="bg-white rounded-lg shadow-xl w-full max-w-xl max-h-[80vh] flex flex-col slide-up"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">整池批量任务</h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {statusLabel[job.status] ?? job.status} · {job.target_pool}
+            </p>
+          </div>
+          {!running && (
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+
+        <div className="px-5 py-4 space-y-4 overflow-y-auto">
+          <div>
+            <div className="flex items-center justify-between text-xs text-slate-500 mb-2">
+              <span>进度</span>
+              <span>{job.progress_completed} / {job.progress_total}</span>
+            </div>
+            <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+              <div
+                className={cn(
+                  'h-full transition-all',
+                  job.status === 'failed' ? 'bg-red-500' : job.status === 'cancelled' ? 'bg-amber-500' : 'bg-blue-600'
+                )}
+                style={{ width: `${percent}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+              <div className="text-slate-400">成功</div>
+              <div className="mt-1 text-sm font-semibold text-green-700">{job.progress_succeeded}</div>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+              <div className="text-slate-400">失败</div>
+              <div className="mt-1 text-sm font-semibold text-red-600">{job.progress_failed}</div>
+            </div>
+          </div>
+
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+            <div className="text-xs text-slate-400 mb-1">任务信息</div>
+            <div className="text-sm text-slate-700">{job.progress_message || '等待中'}</div>
+            {job.error_message && <div className="mt-2 text-xs text-red-600">{job.error_message}</div>}
+          </div>
+
+          {job.errors.length > 0 && (
+            <div className="rounded-md border border-red-100 bg-red-50 px-3 py-3">
+              <div className="text-xs font-semibold text-red-700 mb-2">失败样本</div>
+              <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                {job.errors.map(error => (
+                  <div key={`${error.uuid}-${error.message}`} className="text-xs text-red-700 break-all">
+                    <span className="font-mono mr-2">{error.uuid.slice(0, 8)}</span>
+                    {error.message}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 py-3 border-t border-slate-200 flex items-center justify-end gap-3">
+          {running ? (
+            <button
+              onClick={onCancel}
+              className="px-4 py-1.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors"
+            >
+              取消任务
+            </button>
+          ) : (
+            <button
+              onClick={onClose}
+              className="px-4 py-1.5 text-sm font-medium text-white bg-blue-700 hover:bg-blue-800 rounded-md transition-colors"
+            >
+              关闭
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function Tasks() {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -148,6 +266,7 @@ export function Tasks() {
   const [selectingPool, setSelectingPool] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [batchResult, setBatchResult] = useState<{ result: BatchActionResponse; title: string } | null>(null)
+  const [poolJob, setPoolJob] = useState<WorkflowBatchJob | null>(null)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -170,6 +289,24 @@ export function Tasks() {
     setSelected(new Set())
     loadData()
   }, [loadData])
+
+  useEffect(() => {
+    if (!poolJob || !['queued', 'running', 'cancelling'].includes(poolJob.status)) return
+
+    const timer = window.setInterval(async () => {
+      try {
+        const refreshed = await workflowApi.getBatchJob(poolJob.id)
+        setPoolJob(refreshed)
+        if (['completed', 'cancelled', 'failed'].includes(refreshed.status)) {
+          await loadData()
+        }
+      } catch {
+        window.clearInterval(timer)
+      }
+    }, 1500)
+
+    return () => window.clearInterval(timer)
+  }, [poolJob, loadData])
 
   const switchPool = (key: string) => {
     setSearchParams({ pool: key, page: '1' })
@@ -218,6 +355,43 @@ export function Tasks() {
     image_review_pool: '打回影像准备',
     inference_pool: '打回待审核',
     summary_report_pool: '打回待分析',
+  }
+
+  const poolActionLabel: Record<string, string> = {
+    rollback_previous: rollbackLabelByPool[currentPool] ? `整池${rollbackLabelByPool[currentPool]}` : '整池回退上一池',
+    rollback_reaudit: '一键回溯当前池',
+  }
+
+  const launchPoolAction = async (action: 'rollback_previous' | 'rollback_reaudit') => {
+    const ok = await confirm({
+      title: poolActionLabel[action],
+      message: `将直接在后端对当前池 ${total} 条事件发起批量任务。任务支持查看进度和取消，但已完成的单条回退不会被撤销。确认继续？`,
+      confirmText: '确认启动',
+      danger: true,
+    })
+    if (!ok) return
+
+    setActing(true)
+    try {
+      const job = await workflowApi.createPoolActionJob(action, currentPool)
+      setPoolJob(job)
+      toast.success('批量任务已启动', `任务 #${job.id}`)
+    } catch (err: any) {
+      toast.error('启动失败', err.response?.data?.detail || err.message)
+    } finally {
+      setActing(false)
+    }
+  }
+
+  const cancelPoolJob = async () => {
+    if (!poolJob) return
+    try {
+      const refreshed = await workflowApi.cancelBatchJob(poolJob.id)
+      setPoolJob(refreshed)
+      toast.success('已请求取消', '当前条目完成后会停止')
+    } catch (err: any) {
+      toast.error('取消失败', err.response?.data?.detail || err.message)
+    }
   }
 
   const runBatch = async (action: string) => {
@@ -298,14 +472,36 @@ export function Tasks() {
       <div className="space-y-5">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold text-slate-900">事件处理</h1>
-          <button
-            onClick={loadData}
-            disabled={loading}
-            className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 border border-slate-200 rounded-md px-3 py-1.5 bg-white hover:bg-slate-50 transition-colors disabled:opacity-50"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-            刷新
-          </button>
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            {rollbackLabelByPool[currentPool] && (
+              <button
+                onClick={() => launchPoolAction('rollback_previous')}
+                disabled={loading || acting || total === 0}
+                className="flex items-center gap-1.5 text-xs text-white border border-red-500 rounded-md px-3 py-1.5 bg-red-500 hover:bg-red-400 transition-colors disabled:opacity-50"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                {poolActionLabel.rollback_previous}
+              </button>
+            )}
+            {(currentPool === 'inference_pool' || currentPool === 'summary_report_pool') && (
+              <button
+                onClick={() => launchPoolAction('rollback_reaudit')}
+                disabled={loading || acting || total === 0}
+                className="flex items-center gap-1.5 text-xs text-white border border-amber-600 rounded-md px-3 py-1.5 bg-amber-600 hover:bg-amber-500 transition-colors disabled:opacity-50"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                {poolActionLabel.rollback_reaudit}
+              </button>
+            )}
+            <button
+              onClick={loadData}
+              disabled={loading}
+              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 border border-slate-200 rounded-md px-3 py-1.5 bg-white hover:bg-slate-50 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+              刷新
+            </button>
+          </div>
         </div>
 
         <div className="border-b border-slate-200">
@@ -586,6 +782,14 @@ export function Tasks() {
           result={batchResult.result}
           title={batchResult.title}
           onClose={() => setBatchResult(null)}
+        />
+      )}
+
+      {poolJob && (
+        <BatchJobModal
+          job={poolJob}
+          onClose={() => setPoolJob(null)}
+          onCancel={cancelPoolJob}
         />
       )}
     </Layout>

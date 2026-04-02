@@ -19,6 +19,7 @@ from schemas.schemas import (
     BatchUuidRequest,
     ImageReviewDecisionRequest,
     InferenceTriggerRequest,
+    PoolBatchActionRequest,
     ReportCandidateListResponse,
     ReportCandidateResponse,
     ReportGenerateRequest,
@@ -30,6 +31,8 @@ from schemas.schemas import (
     StageResetRequest,
     SummaryApprovalRequest,
     SummaryGenerateRequest,
+    WorkflowBatchJobError,
+    WorkflowBatchJobResponse,
     WorkflowItemDetailResponse,
     WorkflowItemListResponse,
     WorkflowItemResponse,
@@ -39,6 +42,7 @@ from schemas.schemas import (
     BatchItemResult,
 )
 from services.legacy_bridge import run_legacy_action
+from services.batch_job_service import create_pool_batch_job, dispatch_batch_job, get_batch_job, request_cancel_batch_job
 from services.workflow_service import (
     ensure_workflow_item,
     latest_image_review,
@@ -365,6 +369,40 @@ def _pool_label(pool: str) -> str:
     return mapping.get(pool, pool)
 
 
+def _batch_job_payload(job) -> WorkflowBatchJobResponse:
+    errors: list[WorkflowBatchJobError] = []
+    if job.result_json:
+        import json
+
+        try:
+            payload = json.loads(job.result_json)
+        except json.JSONDecodeError:
+            payload = {}
+        for item in payload.get("errors") or []:
+            if isinstance(item, dict) and item.get("uuid") and item.get("message"):
+                errors.append(WorkflowBatchJobError(uuid=item["uuid"], message=item["message"]))
+
+    return WorkflowBatchJobResponse(
+        id=job.id,
+        action=job.action,
+        target_pool=job.target_pool,
+        status=job.status,
+        progress_total=job.progress_total,
+        progress_completed=job.progress_completed,
+        progress_succeeded=job.progress_succeeded,
+        progress_failed=job.progress_failed,
+        progress_message=job.progress_message,
+        cancel_requested=bool(job.cancel_requested),
+        error_message=job.error_message,
+        created_by=job.created_by,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
+        updated_at=job.updated_at,
+        errors=errors,
+    )
+
+
 def _latest_by_uuid(rows):
     result = {}
     for row in rows:
@@ -491,6 +529,53 @@ def list_workflow_item_selection(
         )
     ]
     return WorkflowSelectionResponse(total=len(uuids), uuids=uuids)
+
+
+@router.post("/pool-actions", response_model=WorkflowBatchJobResponse)
+def create_pool_action_job(
+    req: PoolBatchActionRequest,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    if req.action not in {"rollback_previous", "rollback_reaudit"}:
+        raise HTTPException(status_code=400, detail=f"不支持的池子动作: {req.action}")
+    if req.pool not in {"imagery_pool", "image_review_pool", "inference_pool", "summary_report_pool"}:
+        raise HTTPException(status_code=400, detail=f"不支持的池子: {req.pool}")
+    if req.action == "rollback_reaudit" and req.pool not in {"inference_pool", "summary_report_pool"}:
+        raise HTTPException(status_code=400, detail="一键回溯仅支持分析池和摘要池")
+
+    _refresh_projection(db)
+    try:
+        job = create_pool_batch_job(db, action=req.action, target_pool=req.pool, created_by=admin.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    dispatch_batch_job(job.id)
+    return _batch_job_payload(job)
+
+
+@router.get("/batch-jobs/{job_id}", response_model=WorkflowBatchJobResponse)
+def get_workflow_batch_job(
+    job_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    job = get_batch_job(db, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"批量任务不存在: {job_id}")
+    return _batch_job_payload(job)
+
+
+@router.post("/batch-jobs/{job_id}/cancel", response_model=WorkflowBatchJobResponse)
+def cancel_workflow_batch_job(
+    job_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    job = request_cancel_batch_job(db, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"批量任务不存在: {job_id}")
+    return _batch_job_payload(job)
 
 
 @router.get("/items/{uuid}", response_model=WorkflowItemDetailResponse)

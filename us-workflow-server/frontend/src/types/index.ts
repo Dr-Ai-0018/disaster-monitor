@@ -109,3 +109,26 @@ export interface BatchActionResponse {
     message: string
   }>
 }
+
+export interface WorkflowBatchJob {
+  id: number
+  action: string
+  target_pool: string
+  status: string
+  progress_total: number
+  progress_completed: number
+  progress_succeeded: number
+  progress_failed: number
+  progress_message: string | null
+  cancel_requested: boolean
+  error_message: string | null
+  created_by: string | null
+  created_at: number
+  started_at: number | null
+  finished_at: number | null
+  updated_at: number
+  errors: Array<{
+    uuid: string
+    message: string
+  }>
+}

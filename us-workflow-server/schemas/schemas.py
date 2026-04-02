@@ -64,6 +64,36 @@ class WorkflowSelectionResponse(BaseModel):
     uuids: List[str]
 
 
+class PoolBatchActionRequest(BaseModel):
+    action: str
+    pool: str
+
+
+class WorkflowBatchJobError(BaseModel):
+    uuid: str
+    message: str
+
+
+class WorkflowBatchJobResponse(BaseModel):
+    id: int
+    action: str
+    target_pool: str
+    status: str
+    progress_total: int
+    progress_completed: int
+    progress_succeeded: int
+    progress_failed: int
+    progress_message: Optional[str]
+    cancel_requested: bool
+    error_message: Optional[str]
+    created_by: Optional[str]
+    created_at: int
+    started_at: Optional[int]
+    finished_at: Optional[int]
+    updated_at: int
+    errors: List[WorkflowBatchJobError]
+
+
 class WorkflowItemDetailResponse(WorkflowItemResponse):
     category: Optional[str]
     address: Optional[str]

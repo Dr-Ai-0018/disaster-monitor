@@ -64,3 +64,27 @@ CREATE TABLE IF NOT EXISTS report_candidates (
 CREATE INDEX IF NOT EXISTS idx_report_candidates_date ON report_candidates(report_date);
 CREATE INDEX IF NOT EXISTS idx_report_candidates_uuid ON report_candidates(uuid);
 CREATE INDEX IF NOT EXISTS idx_report_candidates_uuid_updated ON report_candidates(uuid, included, updated_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS workflow_batch_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    action TEXT NOT NULL,
+    target_pool TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    progress_total INTEGER NOT NULL DEFAULT 0,
+    progress_completed INTEGER NOT NULL DEFAULT 0,
+    progress_succeeded INTEGER NOT NULL DEFAULT 0,
+    progress_failed INTEGER NOT NULL DEFAULT 0,
+    progress_message TEXT,
+    cancel_requested INTEGER NOT NULL DEFAULT 0,
+    params_json TEXT,
+    result_json TEXT,
+    error_message TEXT,
+    created_by TEXT,
+    created_at INTEGER NOT NULL,
+    started_at INTEGER,
+    finished_at INTEGER,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_batch_jobs_status ON workflow_batch_jobs(status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_batch_jobs_pool ON workflow_batch_jobs(target_pool, updated_at DESC);

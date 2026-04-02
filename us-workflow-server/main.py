@@ -21,6 +21,7 @@ async def lifespan(app: FastAPI):
     try:
         from database.init_db import init_database
         from models.models import get_session_factory
+        from services.batch_job_service import reconcile_batch_jobs_on_startup
         from services.workflow_service import sync_workflow_projection_if_needed
 
         init_database(
@@ -28,6 +29,8 @@ async def lifespan(app: FastAPI):
             str((Path(__file__).resolve().parent / "database" / "schema.sql").resolve()),
         )
         logger.info("workflow database additions initialized")
+        reconcile_batch_jobs_on_startup()
+        logger.info("workflow batch jobs reconciled on startup")
         session = get_session_factory()()
         try:
             sync_workflow_projection_if_needed(session, force=True)
