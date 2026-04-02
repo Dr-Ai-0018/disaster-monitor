@@ -62,6 +62,11 @@ export const workflowApi = {
     })
     return data
   },
+
+  getItemSelection: async (pool: string): Promise<{ total: number; uuids: string[] }> => {
+    const { data } = await api.get('/workflow/items/selection', { params: { pool } })
+    return data
+  },
   
   getItemDetail: async (uuid: string): Promise<WorkflowItemDetail> => {
     const { data } = await api.get<WorkflowItemDetail>(`/workflow/items/${uuid}`)

@@ -59,6 +59,11 @@ class WorkflowItemListResponse(BaseModel):
     data: List[WorkflowItemResponse]
 
 
+class WorkflowSelectionResponse(BaseModel):
+    total: int
+    uuids: List[str]
+
+
 class WorkflowItemDetailResponse(WorkflowItemResponse):
     category: Optional[str]
     address: Optional[str]

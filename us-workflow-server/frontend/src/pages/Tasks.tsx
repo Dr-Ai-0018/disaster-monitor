@@ -145,6 +145,7 @@ export function Tasks() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [acting, setActing] = useState(false)
+  const [selectingPool, setSelectingPool] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [batchResult, setBatchResult] = useState<{ result: BatchActionResponse; title: string } | null>(null)
 
@@ -197,6 +198,19 @@ export function Tasks() {
 
   const clearSelection = () => {
     setSelected(new Set())
+  }
+
+  const selectCurrentPool = async () => {
+    setSelectingPool(true)
+    try {
+      const result = await workflowApi.getItemSelection(currentPool)
+      setSelected(new Set(result.uuids))
+      toast.success('已全选当前池', `共 ${result.total} 条事件`)
+    } catch (err: any) {
+      toast.error('全选失败', err.response?.data?.detail || err.message)
+    } finally {
+      setSelectingPool(false)
+    }
   }
 
   const rollbackLabelByPool: Record<string, string> = {
@@ -277,6 +291,7 @@ export function Tasks() {
 
   const allChecked = items.length > 0 && selected.size === items.length
   const someChecked = selected.size > 0 && selected.size < items.length
+  const allPoolSelected = total > 0 && selected.size === total
 
   return (
     <Layout>
@@ -329,9 +344,16 @@ export function Tasks() {
           {items.length > 0 && (
             <div className="px-4 py-2 border-b border-slate-100 bg-slate-50 flex items-center justify-between gap-3">
               <div className="text-xs text-slate-500">
-                当前页 {items.length} 条，已选 {selected.size} 条
+                当前页 {items.length} 条，当前池共 {total} 条，已选 {selected.size} 条
               </div>
               <div className="flex items-center gap-2">
+                <button
+                  onClick={selectCurrentPool}
+                  disabled={selectingPool || loading || total === 0 || allPoolSelected}
+                  className="px-2.5 py-1 text-xs font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-50 transition-colors"
+                >
+                  {selectingPool ? '全选中...' : allPoolSelected ? '已全选当前池' : '全选当前池'}
+                </button>
                 <button
                   onClick={toggleAll}
                   className="px-2.5 py-1 text-xs font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 transition-colors"
@@ -351,9 +373,16 @@ export function Tasks() {
           {selected.size > 0 && (
             <div className="flex items-center justify-between px-4 py-2.5 bg-slate-800 border-b border-slate-700">
               <span className="text-sm font-semibold text-white">
-                已选择 {selected.size} 项
+                已选择 {selected.size} 项{allPoolSelected ? '（当前池已全选）' : ''}
               </span>
               <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={selectCurrentPool}
+                  disabled={selectingPool || acting || total === 0 || allPoolSelected}
+                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-slate-700 text-slate-100 hover:bg-slate-600 disabled:opacity-50 transition-colors"
+                >
+                  {selectingPool ? '全选中...' : '全选当前池'}
+                </button>
                 {rollbackLabelByPool[currentPool] && (
                   <ActionBtn
                     icon={RefreshCw}

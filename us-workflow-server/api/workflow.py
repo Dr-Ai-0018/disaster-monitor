@@ -33,6 +33,7 @@ from schemas.schemas import (
     WorkflowItemDetailResponse,
     WorkflowItemListResponse,
     WorkflowItemResponse,
+    WorkflowSelectionResponse,
     WorkflowOverviewCard,
     WorkflowOverviewResponse,
     BatchItemResult,
@@ -471,6 +472,25 @@ def list_workflow_items(
         page_size=page_size,
         data=[_item_payload_from_maps(db, event, related_maps) for event in rows],
     )
+
+
+@router.get("/items/selection", response_model=WorkflowSelectionResponse)
+def list_workflow_item_selection(
+    pool: str = Query(...),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    _refresh_projection(db)
+    uuids = [
+        row[0]
+        for row in (
+            db.query(WorkflowItem.uuid)
+            .filter(WorkflowItem.current_pool == pool)
+            .order_by(WorkflowItem.updated_at.desc(), WorkflowItem.uuid.asc())
+            .all()
+        )
+    ]
+    return WorkflowSelectionResponse(total=len(uuids), uuids=uuids)
 
 
 @router.get("/items/{uuid}", response_model=WorkflowItemDetailResponse)
