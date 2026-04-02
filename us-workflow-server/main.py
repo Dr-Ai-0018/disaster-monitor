@@ -49,9 +49,6 @@ app.include_router(workflow_router)
 
 frontend_dist = Path(__file__).resolve().parent / "frontend" / "dist"
 
-if frontend_dist.exists():
-    app.mount("/assets", StaticFiles(directory=str(frontend_dist / "assets")), name="assets")
-
 
 @app.get("/health")
 def health():
@@ -63,17 +60,28 @@ def health():
     }
 
 
-@app.get("/{full_path:path}", include_in_schema=False)
-def serve_spa(full_path: str):
-    if full_path.startswith("api/"):
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Not found")
+if frontend_dist.exists():
+    app.mount("/assets", StaticFiles(directory=str(frontend_dist / "assets")), name="assets")
     
-    index_path = frontend_dist / "index.html"
-    if index_path.exists():
-        return FileResponse(str(index_path))
-    
-    return {"message": "Frontend not built. Run: cd frontend && npm run build"}
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def serve_spa(full_path: str):
+        if full_path.startswith("api/"):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Not found")
+        
+        file_path = frontend_dist / full_path
+        if file_path.is_file():
+            return FileResponse(str(file_path))
+        
+        index_path = frontend_dist / "index.html"
+        if index_path.exists():
+            return FileResponse(str(index_path))
+        
+        return {"message": "Frontend not built"}
+else:
+    @app.get("/", include_in_schema=False)
+    def no_frontend():
+        return {"message": "Frontend not built. Run: cd frontend && npm run build"}
 
 
 if __name__ == "__main__":
