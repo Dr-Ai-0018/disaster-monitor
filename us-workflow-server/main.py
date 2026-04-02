@@ -20,12 +20,20 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
     try:
         from database.init_db import init_database
+        from models.models import get_session_factory
+        from services.workflow_service import sync_workflow_projection_if_needed
 
         init_database(
             settings.DATABASE_PATH,
             str((Path(__file__).resolve().parent / "database" / "schema.sql").resolve()),
         )
         logger.info("workflow database additions initialized")
+        session = get_session_factory()()
+        try:
+            sync_workflow_projection_if_needed(session, force=True)
+            logger.info("workflow projection warmed on startup")
+        finally:
+            session.close()
     except Exception as e:
         logger.error(f"database init failed: {e}")
         sys.exit(1)

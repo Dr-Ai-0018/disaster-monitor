@@ -54,6 +54,8 @@ class WorkflowItemResponse(BaseModel):
 
 class WorkflowItemListResponse(BaseModel):
     total: int
+    page: int
+    page_size: int
     data: List[WorkflowItemResponse]
 
 

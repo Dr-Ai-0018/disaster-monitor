@@ -34,6 +34,13 @@ export interface WorkflowItem {
   updated_at: number | null
 }
 
+export interface WorkflowItemListResult {
+  total: number
+  page: number
+  page_size: number
+  data: WorkflowItem[]
+}
+
 export interface WorkflowItemDetail extends WorkflowItem {
   category: string | null
   address: string | null

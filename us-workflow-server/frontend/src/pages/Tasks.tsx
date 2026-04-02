@@ -12,6 +12,8 @@ import {
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 
+const PAGE_SIZE = 50
+
 const STAGES = [
   { key: 'event_pool',          label: '全部事件',  short: '事件' },
   { key: 'imagery_pool',        label: '影像准备',  short: '影像' },
@@ -135,8 +137,10 @@ export function Tasks() {
   const confirm = useConfirm()
 
   const currentPool = searchParams.get('pool') || 'event_pool'
+  const currentPage = Math.max(1, Number(searchParams.get('page') || '1') || 1)
   const [overview, setOverview] = useState<WorkflowOverview | null>(null)
   const [items, setItems] = useState<WorkflowItem[]>([])
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [acting, setActing] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -147,16 +151,17 @@ export function Tasks() {
     try {
       const [ov, it] = await Promise.all([
         workflowApi.getOverview(),
-        workflowApi.getItems(currentPool, 100),
+        workflowApi.getItems(currentPool, currentPage, PAGE_SIZE),
       ])
       setOverview(ov)
+      setTotal(it.total)
       setItems(it.data)
     } catch {
       toast.error('加载失败', '请检查网络连接后重试')
     } finally {
       setLoading(false)
     }
-  }, [currentPool])
+  }, [currentPool, currentPage])
 
   useEffect(() => {
     setSelected(new Set())
@@ -164,7 +169,15 @@ export function Tasks() {
   }, [loadData])
 
   const switchPool = (key: string) => {
-    setSearchParams({ pool: key })
+    setSearchParams({ pool: key, page: '1' })
+    setSelected(new Set())
+  }
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
+  const goToPage = (page: number) => {
+    const next = Math.min(totalPages, Math.max(1, page))
+    setSearchParams({ pool: currentPool, page: String(next) })
     setSelected(new Set())
   }
 
@@ -466,8 +479,26 @@ export function Tasks() {
           </div>
 
           {!loading && items.length > 0 && (
-            <div className="px-4 py-2.5 border-t border-slate-100 text-xs text-slate-400">
-              共 {items.length} 条
+            <div className="px-4 py-3 border-t border-slate-100 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-xs text-slate-400">
+                第 {currentPage} / {totalPages} 页，当前 {items.length} 条，共 {total} 条
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => goToPage(currentPage - 1)}
+                  disabled={currentPage <= 1}
+                  className="px-3 py-1.5 text-xs font-medium rounded-md border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  上一页
+                </button>
+                <button
+                  onClick={() => goToPage(currentPage + 1)}
+                  disabled={currentPage >= totalPages}
+                  className="px-3 py-1.5 text-xs font-medium rounded-md border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  下一页
+                </button>
+              </div>
             </div>
           )}
         </div>

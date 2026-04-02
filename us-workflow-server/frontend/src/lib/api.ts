@@ -1,7 +1,7 @@
 import axios from 'axios'
 import type { 
   WorkflowOverview, 
-  WorkflowItem, 
+  WorkflowItemListResult,
   WorkflowItemDetail,
   ReportCandidate,
   DailyReport,
@@ -52,8 +52,14 @@ export const workflowApi = {
     return data
   },
   
-  getItems: async (pool: string, limit: number = 50): Promise<{ total: number; data: WorkflowItem[] }> => {
-    const { data } = await api.get('/workflow/items', { params: { pool, limit } })
+  getItems: async (
+    pool: string,
+    page: number = 1,
+    pageSize: number = 50
+  ): Promise<WorkflowItemListResult> => {
+    const { data } = await api.get('/workflow/items', {
+      params: { pool, page, page_size: pageSize },
+    })
     return data
   },
   

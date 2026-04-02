@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from threading import Lock
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from config.settings import settings
 from models.models import (
     DailyReport,
     Event,
@@ -16,9 +18,20 @@ from models.models import (
     WorkflowItem,
 )
 
+_PROJECTION_LOCK = Lock()
+_PROJECTION_STATE = {
+    "dirty": True,
+    "last_full_sync_ms": 0,
+}
+
 
 def _now_ms() -> int:
     return int(datetime.now(timezone.utc).timestamp() * 1000)
+
+
+def mark_projection_dirty() -> None:
+    with _PROJECTION_LOCK:
+        _PROJECTION_STATE["dirty"] = True
 
 
 def latest_image_review(db: Session, uuid: str) -> Optional[ImageReview]:
@@ -261,22 +274,76 @@ def derive_workflow_state(
 
 
 def sync_workflow_projection(db: Session) -> None:
+    sync_workflow_projection_if_needed(db, force=True)
+
+
+def sync_workflow_projection_if_needed(db: Session, force: bool = False) -> None:
+    now = _now_ms()
+    with _PROJECTION_LOCK:
+        if not force:
+            last_sync_ms = int(_PROJECTION_STATE["last_full_sync_ms"])
+            is_dirty = bool(_PROJECTION_STATE["dirty"])
+            if (not is_dirty) and (now - last_sync_ms < settings.WORKFLOW_PROJECTION_REFRESH_INTERVAL_MS):
+                return
+
+        changed = _sync_workflow_projection_impl(db)
+        _PROJECTION_STATE["last_full_sync_ms"] = now
+        _PROJECTION_STATE["dirty"] = False
+        if changed:
+            db.commit()
+
+
+def _sync_workflow_projection_impl(db: Session) -> bool:
     now = _now_ms()
     changed = False
     events = db.query(Event).all()
+    if not events:
+        return False
+
+    uuids = [event.uuid for event in events]
+    workflow_items = {item.uuid: item for item in db.query(WorkflowItem).filter(WorkflowItem.uuid.in_(uuids)).all()}
+    tasks = {item.uuid: item for item in db.query(TaskQueue).filter(TaskQueue.uuid.in_(uuids)).all()}
+    products = {item.uuid: item for item in db.query(Product).filter(Product.uuid.in_(uuids)).all()}
+    summary_reviews = {item.uuid: item for item in db.query(SummaryReview).filter(SummaryReview.uuid.in_(uuids)).all()}
+
+    image_reviews: dict[str, ImageReview] = {}
+    for row in (
+        db.query(ImageReview)
+        .filter(ImageReview.uuid.in_(uuids))
+        .order_by(ImageReview.uuid.asc(), ImageReview.updated_at.desc(), ImageReview.id.desc())
+        .all()
+    ):
+        image_reviews.setdefault(row.uuid, row)
+
+    report_candidates: dict[str, ReportCandidate] = {}
+    for row in (
+        db.query(ReportCandidate)
+        .filter(ReportCandidate.uuid.in_(uuids), ReportCandidate.included == 1)
+        .order_by(ReportCandidate.uuid.asc(), ReportCandidate.updated_at.desc(), ReportCandidate.id.desc())
+        .all()
+    ):
+        report_candidates.setdefault(row.uuid, row)
+
+    report_dates = {item.report_date for item in report_candidates.values()}
+    daily_reports = {}
+    if report_dates:
+        daily_reports = {
+            item.report_date: item
+            for item in db.query(DailyReport).filter(DailyReport.report_date.in_(report_dates)).all()
+        }
+
     for event in events:
-        existing_item = db.query(WorkflowItem).filter(WorkflowItem.uuid == event.uuid).first()
+        existing_item = workflow_items.get(event.uuid)
         item = existing_item or ensure_workflow_item(db, event)
         if existing_item is None:
+            workflow_items[event.uuid] = item
             changed = True
-        task = db.query(TaskQueue).filter(TaskQueue.uuid == event.uuid).first()
-        product = db.query(Product).filter(Product.uuid == event.uuid).first()
-        image_review = latest_image_review(db, event.uuid)
-        summary_review = db.query(SummaryReview).filter(SummaryReview.uuid == event.uuid).first()
-        report_candidate = latest_report_candidate(db, event.uuid)
-        daily_report = None
-        if report_candidate:
-            daily_report = db.query(DailyReport).filter(DailyReport.report_date == report_candidate.report_date).first()
+        task = tasks.get(event.uuid)
+        product = products.get(event.uuid)
+        image_review = image_reviews.get(event.uuid)
+        summary_review = summary_reviews.get(event.uuid)
+        report_candidate = report_candidates.get(event.uuid)
+        daily_report = daily_reports.get(report_candidate.report_date) if report_candidate else None
 
         state = derive_workflow_state(
             event=event,
@@ -307,8 +374,7 @@ def sync_workflow_projection(db: Session) -> None:
             item.last_transition_at = now
         changed = True
 
-    if changed:
-        db.commit()
+    return changed
 
 
 def reset_inference_content(db: Session, uuid: str) -> int:
@@ -361,6 +427,7 @@ def reset_inference_content(db: Session, uuid: str) -> int:
         event.updated_at = now
 
     db.commit()
+    mark_projection_dirty()
     return affected
 
 
@@ -451,6 +518,7 @@ def reset_workflow_stage(db: Session, uuid: str, stage: str) -> int:
         event.updated_at = now
 
     db.commit()
+    mark_projection_dirty()
     return affected
 
 

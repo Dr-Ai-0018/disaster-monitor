@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS workflow_items (
 
 CREATE INDEX IF NOT EXISTS idx_workflow_items_pool ON workflow_items(current_pool);
 CREATE INDEX IF NOT EXISTS idx_workflow_items_status ON workflow_items(pool_status);
+CREATE INDEX IF NOT EXISTS idx_workflow_items_pool_updated ON workflow_items(current_pool, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_items_updated ON workflow_items(updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS image_reviews (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,6 +35,7 @@ CREATE TABLE IF NOT EXISTS image_reviews (
 
 CREATE INDEX IF NOT EXISTS idx_image_reviews_uuid ON image_reviews(uuid);
 CREATE INDEX IF NOT EXISTS idx_image_reviews_status ON image_reviews(review_status);
+CREATE INDEX IF NOT EXISTS idx_image_reviews_uuid_updated ON image_reviews(uuid, updated_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS summary_reviews (
     uuid TEXT PRIMARY KEY,
@@ -60,3 +63,4 @@ CREATE TABLE IF NOT EXISTS report_candidates (
 
 CREATE INDEX IF NOT EXISTS idx_report_candidates_date ON report_candidates(report_date);
 CREATE INDEX IF NOT EXISTS idx_report_candidates_uuid ON report_candidates(uuid);
+CREATE INDEX IF NOT EXISTS idx_report_candidates_uuid_updated ON report_candidates(uuid, included, updated_at DESC, id DESC);

@@ -40,6 +40,9 @@ class Settings:
         self.SERVER_PORT = int(os.getenv("SERVER_PORT", "2335"))
         self.SERVER_WORKERS = int(os.getenv("SERVER_WORKERS", "1"))
         self.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+        self.WORKFLOW_PROJECTION_REFRESH_INTERVAL_MS = int(
+            os.getenv("WORKFLOW_PROJECTION_REFRESH_INTERVAL_MS", "30000")
+        )
         self.LOG_FILE = os.getenv(
             "LOG_FILE",
             str((self.PROJECT_ROOT / "logs" / "workflow.log").resolve()),
