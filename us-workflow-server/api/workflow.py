@@ -76,7 +76,7 @@ def _summary_label(product: Product | None, summary_review: SummaryReview | None
     if summary_review.summary_status == "rejected":
         return "摘要已打回"
     if report_candidate:
-        return "已准入日报"
+        return "已加入日报候选"
     return "摘要已通过"
 
 
@@ -166,7 +166,7 @@ def _item_payload(db: Session, event: Event) -> WorkflowItemResponse:
         quality=_quality_label(image_review),
         inference=task.status if task else "待创建",
         summary=_summary_label(product, summary_review, report_candidate),
-        report_candidate=f"已入候选 {report_candidate.report_date}" if report_candidate else "未入候选",
+        report_candidate=f"已加入 {report_candidate.report_date} 日报候选" if report_candidate else "未加入日报候选",
         pool_status=_pool_status_label(item.pool_status),
         event_date=event.event_date,
         latitude=event.latitude,
@@ -686,7 +686,7 @@ def batch_summary_approval(
         try:
             _require_event_exists(db, uuid)
             _upsert_summary_review(db, uuid, req.approved, req.reason, req.report_date, admin.username)
-            results.append(BatchItemResult(uuid=uuid, ok=True, message="已准入日报" if req.approved else "摘要已打回"))
+            results.append(BatchItemResult(uuid=uuid, ok=True, message="已加入日报候选" if req.approved else "摘要已打回"))
         except Exception as exc:
             results.append(BatchItemResult(uuid=uuid, ok=False, message=str(exc)))
     db.commit()

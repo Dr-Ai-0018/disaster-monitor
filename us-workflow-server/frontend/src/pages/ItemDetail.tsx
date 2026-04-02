@@ -208,7 +208,7 @@ export function ItemDetail() {
     run('approve_summary', async () => {
       const today = new Date().toISOString().split('T')[0]
       await workflowApi.approveSummary(uuid!, true, undefined, today)
-      toast.success('摘要已通过，已准入日报')
+      toast.success('摘要已通过，已加入日报')
     })
 
   const handleRejectSummary = async () => {
@@ -253,6 +253,7 @@ export function ItemDetail() {
   const isImageReview = item.pool === 'image_review_pool'
   const isInference  = item.pool === 'inference_pool'
   const isSummary    = item.pool === 'summary_report_pool'
+  const poolStatusDisplay = STATUS_DISPLAY[item.pool_status] ?? item.pool_status
 
   const POOL_LABEL: Record<string, string> = {
     event_pool:          '事件接入',
@@ -290,7 +291,7 @@ export function ItemDetail() {
               </span>
             )}
             <span className={`px-2.5 py-1 rounded text-xs font-semibold ${STATUS_CLASS[item.pool_status] ?? 'bg-slate-100 text-slate-600'}`}>
-              {item.pool_status}
+              {poolStatusDisplay}
             </span>
           </div>
         </div>
@@ -339,8 +340,8 @@ export function ItemDetail() {
               )}
               <InfoRow label="摘要"><StatusChip label={item.summary} /></InfoRow>
               {item.report_candidate && (
-                <InfoRow label="日报候选">
-                  <span className={item.report_candidate.includes('已入候选') ? 'text-green-700 font-medium' : 'text-slate-500'}>
+              <InfoRow label="日报候选">
+                  <span className={item.report_candidate.includes('已加入') ? 'text-green-700 font-medium' : 'text-slate-500'}>
                     {item.report_candidate}
                   </span>
                 </InfoRow>

@@ -2,7 +2,7 @@
 
 ## 概览
 
-已将 us-workflow-server 前端从旧的简陋 HTML + 原生 JS 彻底重构为企业级现代化前端。
+已将 us-workflow-server 前端从旧的简陋 HTML + 原生 JS 重构为 React + TypeScript 前端。
 
 ## 技术栈升级
 
@@ -31,18 +31,18 @@
 - 优雅的登录页面
 
 ### 2. 仪表盘
-- 五池实时统计
-- 自动化 vs 人工模式展示
-- 服务状态监控
-- 数据可视化
+- 今日待处理概览
+- 人工介入阶段聚合
+- 今日日报状态
+- 数据概览
 
-### 3. 工作流池管理
-- **五池切换**: 事件池、影像池、影像审核池、推理池、摘要日报池
+### 3. 事件处理
+- **阶段切换**: 事件、影像准备、待审核、待分析、待确认摘要
 - **批量操作**:
   - 批量影像审核（通过/打回）
-  - 批量触发推理
+  - 批量触发分析
   - 批量生成摘要
-  - 批量准入日报
+  - 批量加入日报
 - **详细列表**: 表格展示所有事件，支持多选
 - **状态标签**: 颜色区分不同状态
 - **实时刷新**: 一键刷新数据
@@ -51,9 +51,9 @@
 - 完整事件信息展示
 - 工作流状态追踪
 - 针对不同池的操作按钮:
-  - 影像审核池: 通过/打回影像
-  - 推理池: 触发推理、重置推理
-  - 摘要池: 生成摘要、审核摘要、准入日报
+  - 影像审核阶段: 通过/打回影像
+  - 分析阶段: 触发分析、重置分析
+  - 摘要阶段: 生成摘要、审核摘要、加入日报
 - 任务状态实时展示
 - 错误信息显示
 
@@ -80,7 +80,7 @@ frontend/
 │   ├── pages/
 │   │   ├── Login.tsx        # 登录页
 │   │   ├── Dashboard.tsx    # 仪表盘
-│   │   ├── Pools.tsx        # 工作流池管理
+│   │   ├── Tasks.tsx        # 事件处理
 │   │   ├── ItemDetail.tsx   # 事件详情
 │   │   ├── Reports.tsx      # 日报列表
 │   │   ├── ReportDetail.tsx # 日报详情
@@ -109,13 +109,13 @@ frontend/
 - `POST /api/auth/refresh` - 刷新 Token
 
 ### 工作流 API
-- `GET /api/workflow/overview` - 五池概览
-- `GET /api/workflow/items` - 获取池中事件列表
+- `GET /api/workflow/overview` - 概览
+- `GET /api/workflow/items` - 获取阶段事件列表
 - `GET /api/workflow/items/{uuid}` - 获取事件详情
 - `POST /api/workflow/items/{uuid}/image-review` - 影像审核
 - `POST /api/workflow/items/batch-image-review` - 批量影像审核
-- `POST /api/workflow/items/{uuid}/trigger-inference` - 触发推理
-- `POST /api/workflow/items/batch-trigger-inference` - 批量触发推理
+- `POST /api/workflow/items/{uuid}/trigger-inference` - 触发分析
+- `POST /api/workflow/items/batch-trigger-inference` - 批量触发分析
 - `POST /api/workflow/items/{uuid}/generate-summary` - 生成摘要
 - `POST /api/workflow/items/batch-generate-summary` - 批量生成摘要
 - `POST /api/workflow/items/{uuid}/summary-approval` - 审核摘要
@@ -209,37 +209,25 @@ def serve_spa(full_path: str):
 - 错误提示
 - 成功提示
 
-## 对比截图参考
-
-参考了 New API 的设计风格：
-- 清晰的卡片布局
-- 优雅的表格设计
-- 现代化的按钮和表单
-- 专业的配色方案
-
 ## 技术亮点
 
 1. **类型安全**: 完整的 TypeScript 类型定义
 2. **组件化**: 可复用的 UI 组件
-3. **代码分割**: Vite 自动代码分割优化
-4. **API 管理**: 统一的 axios 实例和拦截器
-5. **路由守卫**: 未登录自动跳转
-6. **错误处理**: 全局错误处理机制
-7. **性能优化**: React memo、懒加载等
+3. **API 管理**: 统一的 axios 实例和拦截器
+4. **路由守卫**: 未登录自动跳转
+5. **错误处理**: 全局错误处理机制
 
 ## 下一步建议
 
-1. **暗黑模式**: 添加深色主题切换
-2. **国际化**: 支持多语言
-3. **图表**: 在仪表盘添加更多可视化图表
-4. **WebSocket**: 实时推送工作流状态更新
-5. **高级搜索**: 在池管理中添加筛选和搜索
-6. **导出功能**: 导出日报为 PDF/Word
+1. **事件影像视图**: 增加灾前/灾后影像预览
+2. **异常聚合**: 在概览页突出异常分析任务
+3. **高级筛选**: 在事件处理页增加筛选和搜索
+4. **导出功能**: 导出日报为 PDF/Word
 
 ## 总结
 
 ✅ **前端已彻底重构完成**
-✅ **企业级设计和代码质量**
+✅ **统一的后台界面与交互**
 ✅ **完整的功能覆盖**
 ✅ **现代化的技术栈**
 ✅ **优秀的用户体验**

@@ -255,7 +255,7 @@ LEGACY_RUNNER = textwrap.dedent(
 
             uuids = [row[0] for row in rows]
             if not uuids:
-                emit({"ok": False, "error": f"日期 {report_date} 没有准入日报的候选事件"}, 2)
+                emit({"ok": False, "error": f"日期 {report_date} 没有已加入日报的候选事件"}, 2)
 
             products = db.query(Product).filter(Product.uuid.in_(uuids)).all()
             if not products:
