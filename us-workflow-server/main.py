@@ -22,6 +22,7 @@ async def lifespan(app: FastAPI):
         from database.init_db import init_database
         from models.models import get_session_factory
         from services.batch_job_service import reconcile_batch_jobs_on_startup
+        from services.scheduler_service import start_scheduler, stop_scheduler
         from services.workflow_service import sync_workflow_projection_if_needed
 
         init_database(
@@ -31,6 +32,8 @@ async def lifespan(app: FastAPI):
         logger.info("workflow database additions initialized")
         reconcile_batch_jobs_on_startup()
         logger.info("workflow batch jobs reconciled on startup")
+        if settings.ENABLE_SCHEDULER:
+            start_scheduler()
         session = get_session_factory()()
         try:
             sync_workflow_projection_if_needed(session, force=True)
@@ -41,6 +44,12 @@ async def lifespan(app: FastAPI):
         logger.error(f"database init failed: {e}")
         sys.exit(1)
     yield
+    try:
+        from services.scheduler_service import stop_scheduler
+
+        stop_scheduler()
+    except Exception as e:
+        logger.warning(f"scheduler stop failed: {e}")
 
 
 app = FastAPI(title="Workflow Server", version="2.0.0", lifespan=lifespan, docs_url="/docs")

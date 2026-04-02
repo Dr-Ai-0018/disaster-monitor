@@ -44,9 +44,23 @@ export interface WorkflowItemListResult {
 export interface WorkflowItemDetail extends WorkflowItem {
   category: string | null
   address: string | null
+  source_url: string | null
+  last_update: number | null
   detail_fetch_status: string | null
+  detail_fetch_attempts: number | null
+  detail_fetch_http_status: number | null
+  detail_fetch_last_attempt: number | null
+  detail_fetch_error: string | null
+  detail_fetch_completed_at: number | null
+  details_json: unknown
   pre_image_path: string | null
+  pre_image_date: number | null
+  pre_image_source: string | null
   post_image_path: string | null
+  post_image_date: number | null
+  post_image_source: string | null
+  quality_score: number | null
+  quality_assessment: unknown
   task_status: string | null
   task_progress_stage: string | null
   task_progress_message: string | null

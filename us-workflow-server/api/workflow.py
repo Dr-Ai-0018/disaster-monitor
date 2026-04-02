@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import io
+import json
 from datetime import date, datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -43,6 +47,8 @@ from schemas.schemas import (
 )
 from services.legacy_bridge import run_legacy_action
 from services.batch_job_service import create_pool_batch_job, dispatch_batch_job, get_batch_job, request_cancel_batch_job
+from services.event_detail_fetcher import EventDetailFetcher
+from services.scheduler_service import job_fetch_event_details, job_fetch_rsoe
 from services.workflow_service import (
     ensure_workflow_item,
     latest_image_review,
@@ -77,6 +83,15 @@ def _quality_label(review) -> str:
         return "待审核"
     mapping = {"approved": "已通过", "rejected": "已打回", "pending": "待审核"}
     return mapping.get(review.review_status or "pending", review.review_status or "待审核")
+
+
+def _json_or_raw(value: str | None):
+    if not value:
+        return None
+    try:
+        return json.loads(value)
+    except Exception:
+        return value
 
 
 def _summary_label(product: Product | None, summary_review: SummaryReview | None, report_candidate: ReportCandidate | None) -> str:
@@ -207,9 +222,23 @@ def _detail_payload(db: Session, uuid: str) -> WorkflowItemDetailResponse:
         **base.model_dump(),
         category=event.category_name or event.category,
         address=event.address,
+        source_url=event.source_url,
+        last_update=event.last_update,
         detail_fetch_status=event.detail_fetch_status,
+        detail_fetch_attempts=event.detail_fetch_attempts or 0,
+        detail_fetch_http_status=event.detail_fetch_http_status,
+        detail_fetch_last_attempt=event.detail_fetch_last_attempt,
+        detail_fetch_error=event.detail_fetch_error,
+        detail_fetch_completed_at=event.detail_fetch_completed_at,
+        details_json=_json_or_raw(event.details_json),
         pre_image_path=event.pre_image_path,
+        pre_image_date=event.pre_image_date,
+        pre_image_source=event.pre_image_source,
         post_image_path=event.post_image_path,
+        post_image_date=event.post_image_date,
+        post_image_source=event.post_image_source,
+        quality_score=event.quality_score,
+        quality_assessment=_json_or_raw(event.quality_assessment),
         task_status=task.status if task else None,
         task_progress_stage=task.progress_stage if task else None,
         task_progress_message=task.progress_message if task else None,
@@ -220,6 +249,79 @@ def _detail_payload(db: Session, uuid: str) -> WorkflowItemDetailResponse:
         report_date=report_candidate.report_date if report_candidate else None,
         report_ready=item.pool_status in {"ready_for_daily_report", "report_draft_ready", "report_published"},
     )
+
+
+def _resolve_image_path(image_path_str: str) -> Path:
+    raw = Path(image_path_str)
+    candidates = [raw]
+    if not raw.is_absolute():
+        candidates.extend(
+            [
+                (settings.PROJECT_ROOT / raw).resolve(),
+                (settings.LEGACY_ROOT / raw).resolve(),
+                (settings.PROJECT_ROOT.parent / raw).resolve(),
+            ]
+        )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise HTTPException(status_code=404, detail="影像文件不存在")
+
+
+def _event_image_path(event: Event, image_type: str) -> Path:
+    if image_type not in {"pre", "post"}:
+        raise HTTPException(status_code=400, detail="image_type 必须是 pre 或 post")
+    image_path_str = event.pre_image_path if image_type == "pre" else event.post_image_path
+    if not image_path_str:
+        raise HTTPException(status_code=404, detail="影像不存在")
+    return _resolve_image_path(image_path_str)
+
+
+def _render_image_preview(path: Path) -> Response:
+    try:
+        from PIL import Image
+    except Exception:
+        return Response(content=path.read_bytes(), media_type="image/tiff")
+
+    try:
+        with Image.open(path) as img:
+            preview = img.convert("RGB")
+            preview.thumbnail((1200, 1200))
+            buf = io.BytesIO()
+            preview.save(buf, format="PNG", optimize=True)
+        return Response(content=buf.getvalue(), media_type="image/png", headers={"Cache-Control": "private, max-age=3600"})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"影像转换失败: {exc}") from exc
+
+
+def _render_enhanced_preview(path: Path) -> Response:
+    try:
+        import numpy as np
+        from PIL import Image
+    except Exception as exc:
+        raise HTTPException(status_code=501, detail=f"增强影像依赖加载失败: {exc}") from exc
+
+    try:
+        with Image.open(path) as img:
+            arr = np.array(img.convert("RGB")).astype(np.float32)
+
+        result = np.zeros_like(arr)
+        for idx in range(3):
+            channel = arr[:, :, idx]
+            nonzero = channel[channel > 0]
+            if nonzero.size == 0:
+                result[:, :, idx] = channel
+                continue
+            p2, p98 = np.percentile(nonzero, (2, 98))
+            result[:, :, idx] = np.clip((channel - p2) / (p98 - p2 + 1e-6) * 255, 0, 255)
+
+        enhanced = Image.fromarray(result.astype("uint8"))
+        enhanced.thumbnail((1200, 1200))
+        buf = io.BytesIO()
+        enhanced.save(buf, format="PNG", optimize=True)
+        return Response(content=buf.getvalue(), media_type="image/png", headers={"Cache-Control": "private, max-age=3600"})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"影像增强失败: {exc}") from exc
 
 
 def _upsert_summary_review(
@@ -586,6 +688,68 @@ def get_workflow_item_detail(
 ):
     _refresh_projection(db)
     return _detail_payload(db, uuid)
+
+
+@router.post("/items/{uuid}/refresh-detail", response_model=ResetResponse)
+def refresh_workflow_item_detail(
+    uuid: str,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    _require_event_exists(db, uuid)
+    fetcher = EventDetailFetcher(db)
+    try:
+        result = fetcher.refresh_single_event(uuid)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    _invalidate_projection()
+    if result.get("success"):
+        return ResetResponse(message="事件详情已重新补抓", affected=1)
+    raise HTTPException(
+        status_code=502 if result.get("http_status") else 400,
+        detail=result.get("error") or "事件详情补抓失败",
+    )
+
+
+@router.get("/items/{uuid}/images/{image_type}")
+def get_workflow_image_preview(
+    uuid: str,
+    image_type: str,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    event = _require_event_exists(db, uuid)
+    path = _event_image_path(event, image_type)
+    return _render_image_preview(path)
+
+
+@router.get("/items/{uuid}/images/{image_type}/enhanced")
+def get_workflow_image_enhanced_preview(
+    uuid: str,
+    image_type: str,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    event = _require_event_exists(db, uuid)
+    path = _event_image_path(event, image_type)
+    return _render_enhanced_preview(path)
+
+
+@router.post("/maintenance/fetch-rsoe", response_model=ResetResponse)
+def manual_fetch_rsoe(
+    _=Depends(get_current_admin),
+):
+    job_fetch_rsoe()
+    return ResetResponse(message="已手动执行 RSOE 抓取", affected=1)
+
+
+@router.post("/maintenance/fetch-event-details", response_model=ResetResponse)
+def manual_fetch_event_details(
+    _=Depends(get_current_admin),
+):
+    job_fetch_event_details()
+    return ResetResponse(message="已手动执行事件详情补抓", affected=1)
 
 
 @router.get("/report-candidates", response_model=ReportCandidateListResponse)

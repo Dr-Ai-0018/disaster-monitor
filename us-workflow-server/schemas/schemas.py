@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from pydantic import BaseModel
 
@@ -97,9 +97,23 @@ class WorkflowBatchJobResponse(BaseModel):
 class WorkflowItemDetailResponse(WorkflowItemResponse):
     category: Optional[str]
     address: Optional[str]
+    source_url: Optional[str] = None
+    last_update: Optional[int] = None
     detail_fetch_status: Optional[str]
+    detail_fetch_attempts: Optional[int] = 0
+    detail_fetch_http_status: Optional[int] = None
+    detail_fetch_last_attempt: Optional[int] = None
+    detail_fetch_error: Optional[str] = None
+    detail_fetch_completed_at: Optional[int] = None
+    details_json: Optional[Any] = None
     pre_image_path: Optional[str]
+    pre_image_date: Optional[int] = None
+    pre_image_source: Optional[str] = None
     post_image_path: Optional[str]
+    post_image_date: Optional[int] = None
+    post_image_source: Optional[str] = None
+    quality_score: Optional[float] = None
+    quality_assessment: Optional[Any] = None
     task_status: Optional[str]
     task_progress_stage: Optional[str]
     task_progress_message: Optional[str]

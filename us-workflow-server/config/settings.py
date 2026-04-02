@@ -31,6 +31,8 @@ class Settings:
         self.APP_NAME = os.getenv("APP_NAME", "DisasterWorkflowServer")
         self.APP_ENV = os.getenv("APP_ENV", "development")
         self.DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+        self.REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))
+        self.REQUEST_DELAY = float(os.getenv("REQUEST_DELAY", "1.5"))
         self.JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-jwt-secret")
         self.JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
         self.JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(
@@ -49,6 +51,27 @@ class Settings:
         )
         self.ENABLE_SCHEDULER = os.getenv("ENABLE_SCHEDULER", "true").lower() == "true"
         self.LEGACY_PYTHON = os.getenv("LEGACY_PYTHON", self._detect_legacy_python())
+        self.SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "")
+
+        self.SESSION_EDIS_WEB = os.getenv("SESSION_EDIS_WEB", "")
+        self.ARR_AFFINITY = os.getenv("ARR_AFFINITY", "")
+        self.ARR_AFFINITY_SAME_SITE = os.getenv("ARR_AFFINITY_SAME_SITE", "")
+        self.GA = os.getenv("_GA", "")
+        self.GADS = os.getenv("__GADS", "")
+        self.GPI = os.getenv("__GPI", "")
+        self.EOI = os.getenv("__EOI", "")
+        self.GA_KHD7YP5VHW = os.getenv("_GA_KHD7YP5VHW", "")
+
+        self.DETAIL_FETCH_ENABLED = os.getenv("DETAIL_FETCH_ENABLED", "true").lower() == "true"
+        self.DETAIL_FETCH_RUN_ON_STARTUP = os.getenv("DETAIL_FETCH_RUN_ON_STARTUP", "true").lower() == "true"
+        self.DETAIL_FETCH_INTERVAL_MINUTES = int(os.getenv("DETAIL_FETCH_INTERVAL_MINUTES", "10"))
+        self.DETAIL_FETCH_BATCH_SIZE = int(os.getenv("DETAIL_FETCH_BATCH_SIZE", "20"))
+        self.DETAIL_FETCH_CONCURRENCY = max(1, int(os.getenv("DETAIL_FETCH_CONCURRENCY", "1")))
+        self.DETAIL_FETCH_DELAY_MIN_SECONDS = float(os.getenv("DETAIL_FETCH_DELAY_MIN_SECONDS", "1"))
+        self.DETAIL_FETCH_DELAY_MAX_SECONDS = float(os.getenv("DETAIL_FETCH_DELAY_MAX_SECONDS", "3"))
+        self.DETAIL_FETCH_TIMEOUT_SECONDS = int(
+            os.getenv("DETAIL_FETCH_TIMEOUT_SECONDS", str(self.REQUEST_TIMEOUT))
+        )
 
         database_url = os.getenv("DATABASE_URL", "").strip()
         if database_url:
@@ -86,8 +109,14 @@ class Settings:
                 self._config = json.load(f)
 
         self.SCHEDULER_CONFIG = self._config.get("scheduler", {})
+        self.RSOE_CONFIG = self._config.get("rsoe", {})
         self.GEE_CONFIG = self._config.get("gee", {})
         self.TASK_QUEUE_CONFIG = self._config.get("task_queue", {})
+        self.STORAGE_CONFIG = self._config.get("storage", {})
+        self.QUALITY_CONFIG = self._config.get("quality_assessment", {})
+
+        if self.DETAIL_FETCH_DELAY_MAX_SECONDS < self.DETAIL_FETCH_DELAY_MIN_SECONDS:
+            self.DETAIL_FETCH_DELAY_MAX_SECONDS = self.DETAIL_FETCH_DELAY_MIN_SECONDS
 
     def _detect_legacy_python(self) -> str:
         candidates = [
@@ -98,6 +127,46 @@ class Settings:
             if candidate.exists():
                 return str(candidate.resolve())
         return sys.executable
+
+    def get_rsoe_cookies(self) -> dict[str, str]:
+        return {
+            "session_edis_web": self.SESSION_EDIS_WEB,
+            "ARRAffinity": self.ARR_AFFINITY,
+            "ARRAffinitySameSite": self.ARR_AFFINITY_SAME_SITE,
+            "_ga": self.GA,
+            "__gads": self.GADS,
+            "__gpi": self.GPI,
+            "__eoi": self.EOI,
+            "_ga_KHD7YP5VHW": self.GA_KHD7YP5VHW,
+        }
+
+    def get_rsoe_headers(self) -> dict[str, str]:
+        base = self.RSOE_CONFIG.get("base_url", "https://rsoe-edis.org")
+        return {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cache-Control": "max-age=0",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Referer": base + "/services",
+        }
+
+    def get_rsoe_api_headers(self, event_id: int, sub_id: int) -> dict[str, str]:
+        base = self.RSOE_CONFIG.get("base_url", "https://rsoe-edis.org")
+        return {
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": f"{base}/eventList/details/{event_id}/{sub_id}",
+            "X-Requested-With": "XMLHttpRequest",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+        }
 
     def get(self, key: str, default: Any = None) -> Any:
         value: Any = self._config

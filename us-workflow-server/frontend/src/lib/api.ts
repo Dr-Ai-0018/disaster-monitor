@@ -88,6 +88,19 @@ export const workflowApi = {
     const { data } = await api.get<WorkflowItemDetail>(`/workflow/items/${uuid}`)
     return data
   },
+
+  refreshDetail: async (uuid: string): Promise<{ message: string; affected: number }> => {
+    const { data } = await api.post(`/workflow/items/${uuid}/refresh-detail`)
+    return data
+  },
+
+  getImageBlob: async (uuid: string, imageType: 'pre' | 'post', enhanced: boolean = false): Promise<Blob> => {
+    const suffix = enhanced ? '/enhanced' : ''
+    const { data } = await api.get(`/workflow/items/${uuid}/images/${imageType}${suffix}`, {
+      responseType: 'blob',
+    })
+    return data
+  },
   
   resetInference: async (uuid: string): Promise<{ message: string; affected: number }> => {
     const { data } = await api.post(`/workflow/items/${uuid}/reset-inference`)
