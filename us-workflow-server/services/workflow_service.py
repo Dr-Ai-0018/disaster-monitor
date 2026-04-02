@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from threading import Lock
 from typing import Optional
@@ -72,6 +73,137 @@ def ensure_workflow_item(db: Session, event: Event) -> WorkflowItem:
     return item
 
 
+def _selected_image_type(image_review: Optional[ImageReview], task: Optional[TaskQueue]) -> Optional[str]:
+    if image_review and image_review.selected_image_type:
+        return image_review.selected_image_type
+
+    if task and task.task_data:
+        try:
+            payload = json.loads(task.task_data)
+        except json.JSONDecodeError:
+            payload = {}
+        selected = payload.get("selected_image_type")
+        if selected in {"pre", "post"}:
+            return selected
+        image_kind = payload.get("image_kind")
+        if image_kind == "pre_disaster":
+            return "pre"
+        if image_kind == "post_disaster":
+            return "post"
+
+    return None
+
+
+def _derive_post_review_state(
+    task: Optional[TaskQueue],
+    product: Optional[Product],
+    summary_review: Optional[SummaryReview],
+    report_candidate: Optional[ReportCandidate],
+    daily_report: Optional[DailyReport],
+    selected_image_type: Optional[str],
+) -> dict:
+    selected = selected_image_type or "post"
+
+    if task is None:
+        return {
+            "current_pool": "inference_pool",
+            "pool_status": "await_inference_trigger",
+            "auto_stage": "imagery_download",
+            "manual_stage": "trigger_inference",
+            "selected_image_type": selected,
+        }
+
+    inference_status = task.status or "pending"
+    if inference_status in {"pending", "queued"}:
+        return {
+            "current_pool": "inference_pool",
+            "pool_status": "await_inference_execution",
+            "auto_stage": "imagery_download",
+            "manual_stage": "trigger_inference",
+            "selected_image_type": selected,
+        }
+
+    if inference_status in {"running"}:
+        return {
+            "current_pool": "inference_pool",
+            "pool_status": "inference_running",
+            "auto_stage": "imagery_download",
+            "manual_stage": "trigger_inference",
+            "selected_image_type": selected,
+        }
+
+    if inference_status in {"failed", "paused", "pause_requested"}:
+        return {
+            "current_pool": "inference_pool",
+            "pool_status": "inference_needs_attention",
+            "auto_stage": "imagery_download",
+            "manual_stage": "trigger_inference",
+            "selected_image_type": selected,
+        }
+
+    if not product or not product.inference_result:
+        return {
+            "current_pool": "inference_pool",
+            "pool_status": "await_product_materialization",
+            "auto_stage": "imagery_download",
+            "manual_stage": "trigger_inference",
+            "selected_image_type": selected,
+        }
+
+    if not product.summary:
+        return {
+            "current_pool": "summary_report_pool",
+            "pool_status": "await_summary_generation",
+            "auto_stage": "manual_gate",
+            "manual_stage": "generate_summary",
+            "selected_image_type": selected,
+        }
+
+    if summary_review is None or summary_review.summary_status == "pending":
+        return {
+            "current_pool": "summary_report_pool",
+            "pool_status": "await_summary_review",
+            "auto_stage": "manual_gate",
+            "manual_stage": "review_summary",
+            "selected_image_type": selected,
+        }
+
+    if summary_review.summary_status == "rejected":
+        return {
+            "current_pool": "summary_report_pool",
+            "pool_status": "summary_rejected",
+            "auto_stage": "manual_gate",
+            "manual_stage": "generate_summary",
+            "selected_image_type": selected,
+        }
+
+    if report_candidate is None:
+        return {
+            "current_pool": "summary_report_pool",
+            "pool_status": "await_report_push",
+            "auto_stage": "manual_gate",
+            "manual_stage": "push_to_report",
+            "selected_image_type": selected,
+        }
+
+    if daily_report is None:
+        return {
+            "current_pool": "summary_report_pool",
+            "pool_status": "ready_for_daily_report",
+            "auto_stage": "manual_gate",
+            "manual_stage": "generate_report",
+            "selected_image_type": selected,
+        }
+
+    return {
+        "current_pool": "summary_report_pool",
+        "pool_status": "report_published" if daily_report.published else "report_draft_ready",
+        "auto_stage": "manual_gate",
+        "manual_stage": "generate_report",
+        "selected_image_type": selected,
+    }
+
+
 def derive_workflow_state(
     event: Event,
     task: Optional[TaskQueue],
@@ -82,12 +214,13 @@ def derive_workflow_state(
     daily_report: Optional[DailyReport],
 ) -> dict:
     has_any_image = bool(event.pre_image_path or event.post_image_path)
+    selected_image_type = _selected_image_type(image_review, task)
     state = {
         "current_pool": "event_pool",
         "pool_status": "await_imagery",
         "auto_stage": "event_ingest",
         "manual_stage": "image_review",
-        "selected_image_type": None,
+        "selected_image_type": selected_image_type,
     }
 
     if not has_any_image:
@@ -105,6 +238,15 @@ def derive_workflow_state(
         return state
 
     if image_review is None:
+        if task is not None or product is not None:
+            return _derive_post_review_state(
+                task=task,
+                product=product,
+                summary_review=summary_review,
+                report_candidate=report_candidate,
+                daily_report=daily_report,
+                selected_image_type=selected_image_type,
+            )
         state.update(
             {
                 "current_pool": "image_review_pool",
@@ -115,7 +257,6 @@ def derive_workflow_state(
         )
         return state
 
-    selected_image_type = image_review.selected_image_type or "post"
     if image_review.review_status == "rejected":
         state.update(
             {
@@ -123,7 +264,7 @@ def derive_workflow_state(
                 "pool_status": "image_rejected",
                 "auto_stage": "imagery_download",
                 "manual_stage": "image_review",
-                "selected_image_type": selected_image_type,
+                "selected_image_type": selected_image_type or "post",
             }
         )
         return state
@@ -135,142 +276,18 @@ def derive_workflow_state(
                 "pool_status": "await_image_review",
                 "auto_stage": "imagery_download",
                 "manual_stage": "image_review",
-                "selected_image_type": selected_image_type,
+                "selected_image_type": selected_image_type or "post",
             }
         )
         return state
-
-    if task is None:
-        state.update(
-            {
-                "current_pool": "inference_pool",
-                "pool_status": "await_inference_trigger",
-                "auto_stage": "imagery_download",
-                "manual_stage": "trigger_inference",
-                "selected_image_type": selected_image_type,
-            }
-        )
-        return state
-
-    inference_status = task.status or "pending"
-    if inference_status in {"pending", "queued"}:
-        state.update(
-            {
-                "current_pool": "inference_pool",
-                "pool_status": "await_inference_execution",
-                "auto_stage": "imagery_download",
-                "manual_stage": "trigger_inference",
-                "selected_image_type": selected_image_type,
-            }
-        )
-        return state
-
-    if inference_status in {"running"}:
-        state.update(
-            {
-                "current_pool": "inference_pool",
-                "pool_status": "inference_running",
-                "auto_stage": "imagery_download",
-                "manual_stage": "trigger_inference",
-                "selected_image_type": selected_image_type,
-            }
-        )
-        return state
-
-    if inference_status in {"failed", "paused", "pause_requested"}:
-        state.update(
-            {
-                "current_pool": "inference_pool",
-                "pool_status": "inference_needs_attention",
-                "auto_stage": "imagery_download",
-                "manual_stage": "trigger_inference",
-                "selected_image_type": selected_image_type,
-            }
-        )
-        return state
-
-    if not product or not product.inference_result:
-        state.update(
-            {
-                "current_pool": "inference_pool",
-                "pool_status": "await_product_materialization",
-                "auto_stage": "imagery_download",
-                "manual_stage": "trigger_inference",
-                "selected_image_type": selected_image_type,
-            }
-        )
-        return state
-
-    if not product.summary:
-        state.update(
-            {
-                "current_pool": "summary_report_pool",
-                "pool_status": "await_summary_generation",
-                "auto_stage": "manual_gate",
-                "manual_stage": "generate_summary",
-                "selected_image_type": selected_image_type,
-            }
-        )
-        return state
-
-    if summary_review is None or summary_review.summary_status == "pending":
-        state.update(
-            {
-                "current_pool": "summary_report_pool",
-                "pool_status": "await_summary_review",
-                "auto_stage": "manual_gate",
-                "manual_stage": "review_summary",
-                "selected_image_type": selected_image_type,
-            }
-        )
-        return state
-
-    if summary_review.summary_status == "rejected":
-        state.update(
-            {
-                "current_pool": "summary_report_pool",
-                "pool_status": "summary_rejected",
-                "auto_stage": "manual_gate",
-                "manual_stage": "generate_summary",
-                "selected_image_type": selected_image_type,
-            }
-        )
-        return state
-
-    if report_candidate is None:
-        state.update(
-            {
-                "current_pool": "summary_report_pool",
-                "pool_status": "await_report_push",
-                "auto_stage": "manual_gate",
-                "manual_stage": "push_to_report",
-                "selected_image_type": selected_image_type,
-            }
-        )
-        return state
-
-    if daily_report is None:
-        state.update(
-            {
-                "current_pool": "summary_report_pool",
-                "pool_status": "ready_for_daily_report",
-                "auto_stage": "manual_gate",
-                "manual_stage": "generate_report",
-                "selected_image_type": selected_image_type,
-            }
-        )
-        return state
-
-    state.update(
-        {
-            "current_pool": "summary_report_pool",
-            "pool_status": "report_published" if daily_report.published else "report_draft_ready",
-            "auto_stage": "manual_gate",
-            "manual_stage": "generate_report",
-            "selected_image_type": selected_image_type,
-        }
+    return _derive_post_review_state(
+        task=task,
+        product=product,
+        summary_review=summary_review,
+        report_candidate=report_candidate,
+        daily_report=daily_report,
+        selected_image_type=selected_image_type,
     )
-    return state
 
 
 def sync_workflow_projection(db: Session) -> None:
