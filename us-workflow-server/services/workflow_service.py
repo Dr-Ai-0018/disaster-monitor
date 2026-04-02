@@ -213,7 +213,6 @@ def derive_workflow_state(
     report_candidate: Optional[ReportCandidate],
     daily_report: Optional[DailyReport],
 ) -> dict:
-    has_any_image = bool(event.pre_image_path or event.post_image_path)
     selected_image_type = _selected_image_type(image_review, task)
     state = {
         "current_pool": "event_pool",
@@ -223,6 +222,20 @@ def derive_workflow_state(
         "selected_image_type": selected_image_type,
     }
 
+    # Legacy compatibility: some historical rows already completed inference/materialization
+    # before workflow/image review tables existed, so they must not be pushed back to
+    # event/image-review pools even if imagery paths or review rows are missing now.
+    if task is not None or product is not None:
+        return _derive_post_review_state(
+            task=task,
+            product=product,
+            summary_review=summary_review,
+            report_candidate=report_candidate,
+            daily_report=daily_report,
+            selected_image_type=selected_image_type,
+        )
+
+    has_any_image = bool(event.pre_image_path or event.post_image_path)
     if not has_any_image:
         return state
 
@@ -238,15 +251,6 @@ def derive_workflow_state(
         return state
 
     if image_review is None:
-        if task is not None or product is not None:
-            return _derive_post_review_state(
-                task=task,
-                product=product,
-                summary_review=summary_review,
-                report_candidate=report_candidate,
-                daily_report=daily_report,
-                selected_image_type=selected_image_type,
-            )
         state.update(
             {
                 "current_pool": "image_review_pool",

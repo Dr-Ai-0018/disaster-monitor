@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from collections import Counter
+from pathlib import Path
 
 from sqlalchemy.orm import Session
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from models.models import DailyReport, Event, ImageReview, Product, ReportCandidate, SummaryReview, TaskQueue, WorkflowItem, get_session_factory
 from services.workflow_service import derive_workflow_state
@@ -63,6 +69,13 @@ def _target_events(db: Session, only_uuid: str | None) -> list[Event]:
     return query.all()
 
 
+def _daily_report_for_uuid(related: dict, uuid: str) -> DailyReport | None:
+    candidate = related["report_candidates"].get(uuid)
+    if not candidate:
+        return None
+    return related["daily_reports"].get(candidate.report_date)
+
+
 def _apply_state(item: WorkflowItem, new_state: dict, now_ms: int) -> bool:
     pool_changed = item.current_pool != new_state["current_pool"] or item.pool_status != new_state["pool_status"]
     field_changed = (
@@ -103,6 +116,7 @@ def main() -> None:
         print(f"matched={len(events)}")
 
         transitions = Counter()
+        unchanged = 0
         changed = 0
         samples: list[dict] = []
 
@@ -118,14 +132,15 @@ def main() -> None:
                 image_review=related["image_reviews"].get(event.uuid),
                 summary_review=related["summary_reviews"].get(event.uuid),
                 report_candidate=related["report_candidates"].get(event.uuid),
-                daily_report=related["daily_reports"].get(
-                    related["report_candidates"].get(event.uuid).report_date
-                ) if related["report_candidates"].get(event.uuid) else None,
+                daily_report=_daily_report_for_uuid(related, event.uuid),
             )
 
             before = (item.current_pool, item.pool_status)
             after = (state["current_pool"], state["pool_status"])
             transitions[f"{before[0]}/{before[1]} -> {after[0]}/{after[1]}"] += 1
+            changed_now = before != after or item.auto_stage != state["auto_stage"] or item.manual_stage != state["manual_stage"] or item.selected_image_type != state["selected_image_type"]
+            if not changed_now:
+                unchanged += 1
 
             if len(samples) < args.limit:
                 samples.append(
@@ -137,6 +152,7 @@ def main() -> None:
                         "after_pool": state["current_pool"],
                         "after_status": state["pool_status"],
                         "selected_image_type": state["selected_image_type"],
+                        "changed": changed_now,
                     }
                 )
 
@@ -146,6 +162,8 @@ def main() -> None:
         print("\ntransitions:")
         for key, count in transitions.most_common():
             print(f"  {count:>5}  {key}")
+
+        print(f"\nunchanged={unchanged}")
 
         print("\nsamples:")
         for row in samples:
