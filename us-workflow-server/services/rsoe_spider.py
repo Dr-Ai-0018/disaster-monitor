@@ -4,8 +4,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import requests
-
 from config.settings import settings
 from utils.logger import get_logger
 
@@ -46,6 +44,8 @@ class RsoeSpider:
     def fetch_event_list(self) -> List[Dict]:
         logger.info("开始抓取 RSOE 事件列表...")
         try:
+            import requests
+
             resp = requests.get(
                 self.EVENT_LIST_API,
                 headers=settings.get_rsoe_headers(),
@@ -108,6 +108,8 @@ class RsoeSpider:
     ) -> Dict:
         url = f"{self.EVENT_DETAIL_API}/{event_id}/{sub_id}"
         try:
+            import requests
+
             resp = requests.get(
                 url,
                 headers=settings.get_rsoe_api_headers(event_id, sub_id),
@@ -166,8 +168,9 @@ class RsoeSpider:
         except Exception as e:
             logger.error(f"获取事件详情失败 {event_id}/{sub_id}: {e}")
             status_code = None
-            if isinstance(e, requests.HTTPError) and getattr(e, "response", None) is not None:
-                status_code = e.response.status_code
+            response = getattr(e, "response", None)
+            if response is not None:
+                status_code = response.status_code
             return {
                 "success": False,
                 "status": "failed",

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from config.settings import settings
 from models.models import Event, get_session_factory
 from services.event_detail_fetcher import EventDetailFetcher
+from services.legacy_bridge import run_legacy_action
 from services.rsoe_spider import RsoeSpider
 from services.workflow_service import mark_projection_dirty
 from utils.logger import get_logger
@@ -13,6 +14,11 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 _scheduler = None
+PROCESS_PENDING_LIMIT = 5
+PROCESS_GEE_LIMIT = 5
+PROCESS_ASSESS_LIMIT = 5
+PROCESS_ENQUEUE_LIMIT = 5
+PROCESS_INFERENCE_LIMIT = 3
 
 
 def _now_ms() -> int:
@@ -110,6 +116,63 @@ def job_fetch_event_details() -> None:
         db.close()
 
 
+def job_process_pool() -> None:
+    logger.info("⏰ [workflow] 处理影像准备链路...")
+    try:
+        result = run_legacy_action(
+            "process_pool",
+            {
+                "pending_limit": PROCESS_PENDING_LIMIT,
+                "gee_limit": PROCESS_GEE_LIMIT,
+                "assess_limit": PROCESS_ASSESS_LIMIT,
+                "enqueue_limit": PROCESS_ENQUEUE_LIMIT,
+                "days_threshold": 30,
+            },
+        )
+        logger.info(
+            "[workflow] 影像链处理完成: "
+            f"pending→pool={result.get('processed_pending', 0)}, "
+            f"GEE任务={result.get('submitted_gee', 0)}, "
+            f"质量评估={result.get('assessed_ready', 0)}, "
+            f"入队={result.get('enqueued_checked', 0)}, "
+            f"过期停用={result.get('deactivated', 0)}"
+        )
+        mark_projection_dirty()
+    except Exception as e:
+        logger.error(f"[workflow] 影像准备链处理失败: {e}")
+
+
+def job_process_inference_queue() -> None:
+    logger.info("⏰ [workflow] 执行内部推理队列...")
+    try:
+        result = run_legacy_action("process_inference_queue", {"limit": PROCESS_INFERENCE_LIMIT})
+        logger.info(f"[workflow] 内部推理队列完成: {result.get('processed', 0)} 个")
+        mark_projection_dirty()
+    except Exception as e:
+        logger.error(f"[workflow] 执行内部推理队列失败: {e}")
+
+
+def job_recheck_imagery() -> None:
+    logger.info("⏰ [workflow] 开始影像动态补全检查...")
+    try:
+        result = run_legacy_action("recheck_imagery", {"post_limit": 20, "pre_limit": 20})
+        logger.info(f"[workflow] 影像补全结果: 灾后+{result.get('post_count', 0)}, 灾前+{result.get('pre_count', 0)}")
+        mark_projection_dirty()
+    except Exception as e:
+        logger.error(f"[workflow] 影像补全检查失败: {e}")
+
+
+def job_generate_report() -> None:
+    report_date = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+    logger.info(f"⏰ [workflow] 生成日报: {report_date}")
+    try:
+        run_legacy_action("generate_daily_report", {"report_date": report_date, "summary_limit": 100})
+        logger.info(f"[workflow] 日报生成完成: {report_date}")
+        mark_projection_dirty()
+    except Exception as e:
+        logger.error(f"[workflow] 日报生成失败: {e}")
+
+
 def setup_scheduler():
     global _scheduler
     if _scheduler is not None:
@@ -117,6 +180,7 @@ def setup_scheduler():
 
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.triggers.cron import CronTrigger
         from apscheduler.triggers.interval import IntervalTrigger
     except Exception as e:
         logger.error(f"APScheduler 不可用，跳过 workflow 调度器: {e}")
@@ -147,6 +211,43 @@ def setup_scheduler():
             replace_existing=True,
             misfire_grace_time=600,
             next_run_time=next_run,
+        )
+
+    if sched_cfg.get("process_pool", {}).get("enabled", True):
+        scheduler.add_job(
+            job_process_pool,
+            IntervalTrigger(hours=sched_cfg.get("process_pool", {}).get("interval_hours", 1)),
+            id="process_pool",
+            replace_existing=True,
+            misfire_grace_time=600,
+        )
+
+    if sched_cfg.get("process_inference_queue", {}).get("enabled", True):
+        scheduler.add_job(
+            job_process_inference_queue,
+            IntervalTrigger(minutes=sched_cfg.get("process_inference_queue", {}).get("interval_minutes", 5)),
+            id="process_inference_queue",
+            replace_existing=True,
+            misfire_grace_time=600,
+        )
+
+    recheck_cfg = sched_cfg.get("recheck_imagery", {})
+    if recheck_cfg.get("enabled", True):
+        scheduler.add_job(
+            job_recheck_imagery,
+            IntervalTrigger(hours=recheck_cfg.get("interval_hours", 1)),
+            id="recheck_imagery",
+            replace_existing=True,
+            misfire_grace_time=600,
+        )
+
+    if sched_cfg.get("generate_daily_report", {}).get("enabled", True):
+        scheduler.add_job(
+            job_generate_report,
+            CronTrigger(hour=sched_cfg.get("generate_daily_report", {}).get("hour", 7), minute=sched_cfg.get("generate_daily_report", {}).get("minute", 0)),
+            id="generate_daily_report",
+            replace_existing=True,
+            misfire_grace_time=3600,
         )
 
     _scheduler = scheduler

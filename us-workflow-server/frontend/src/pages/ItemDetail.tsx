@@ -89,6 +89,43 @@ function prettyJson(value: unknown) {
   if (typeof value === 'string') return value
   try { return JSON.stringify(value, null, 2) } catch { return String(value) }
 }
+function extractDetailSummary(item: WorkflowItemDetail): Array<{ label: string; value: string }> {
+  const raw = item.details_json
+  const summary: Array<{ label: string; value: string }> = []
+  const push = (label: string, value: unknown) => {
+    if (value == null) return
+    const text = String(value).trim()
+    if (!text || text === '-') return
+    summary.push({ label, value: text })
+  }
+
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const root = raw as Record<string, unknown>
+    const feature = Array.isArray(root.features) ? root.features[0] as Record<string, unknown> | undefined : undefined
+    const props = feature && typeof feature.properties === 'object' && feature.properties ? feature.properties as Record<string, unknown> : {}
+    const eventTime = props.eventDate ?? root.eventDate ?? item.event_date
+    const lastUpdate = props.lastUpdate ?? root.lastUpdate ?? item.last_update
+    push('标题', props.title ?? root.title ?? item.title)
+    push('类别', props.categoryName ?? props.category ?? root.categoryName ?? root.category ?? item.category)
+    push('严重度', props.severity ?? root.severity ?? item.severity)
+    push('事件时间', eventTime != null ? formatMaybeDate(Number(eventTime)) : null)
+    push('最后更新', lastUpdate != null ? formatMaybeDate(Number(lastUpdate)) : null)
+    push('影响区域', props.location ?? props.address ?? root.location ?? root.affectedRegion ?? item.address)
+    push('来源', root.source ?? props.source)
+    push('来源链接', root.sourceUrl ?? root.source_url ?? item.source_url)
+    push('补充信息', root.description ?? props.description)
+  }
+
+  if (summary.length === 0) {
+    push('标题', item.title)
+    push('类别', item.category)
+    push('严重度', item.severity)
+    push('地区', item.country)
+    push('地址', item.address)
+  }
+
+  return summary
+}
 function formatMaybeDate(value: number | null | undefined) {
   return value ? formatDate(value) : '暂无'
 }
@@ -377,6 +414,7 @@ export function ItemDetail() {
   const isSummary = item.pool === 'summary_report_pool'
   const canRollbackPrevious = item.pool !== 'event_pool'
   const poolStatusDisplay = STATUS_DISPLAY[item.pool_status] ?? item.pool_status
+  const detailSummary = extractDetailSummary(item)
 
   return (
     <Layout>
@@ -431,6 +469,21 @@ export function ItemDetail() {
               <InfoRow label="完成时间">{formatMaybeDate(item.detail_fetch_completed_at)}</InfoRow>
               <InfoRow label="HTTP 状态">{item.detail_fetch_http_status ?? '暂无'}</InfoRow>
               {item.detail_fetch_error && <InfoRow label="错误信息"><span className="text-red-600">{item.detail_fetch_error}</span></InfoRow>}
+            </SectionCard>
+
+            <SectionCard title="已抓取详情摘要">
+              {detailSummary.length > 0 ? (
+                <div className="grid gap-x-6 gap-y-3 py-4 md:grid-cols-2">
+                  {detailSummary.map((entry) => (
+                    <div key={`${entry.label}-${entry.value}`} className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                      <div className="text-xs text-slate-400">{entry.label}</div>
+                      <div className="mt-1 text-sm text-slate-800 break-words">{entry.value}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-4 text-sm text-slate-400">当前还没有抓到可展示的详情内容</div>
+              )}
             </SectionCard>
 
             <SectionCard title="影像预览">

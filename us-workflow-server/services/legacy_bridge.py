@@ -343,6 +343,48 @@ LEGACY_RUNNER = textwrap.dedent(
                 }
             )
 
+        if action == "process_pool":
+            pm = PoolManager(db)
+            epm = EventPoolManager(db)
+            p1 = pm.process_pending_events(limit=payload.get("pending_limit", 5))
+            p2 = pm.submit_gee_tasks_for_pool(limit=payload.get("gee_limit", 5))
+            p3 = pm.assess_ready_events(limit=payload.get("assess_limit", 5))
+            p4 = pm.enqueue_checked_events(limit=payload.get("enqueue_limit", 5))
+            deactivated = epm.deactivate_stale_events(days_threshold=payload.get("days_threshold", 30))
+            emit({
+                "ok": True,
+                "processed_pending": p1,
+                "submitted_gee": p2,
+                "assessed_ready": p3,
+                "enqueued_checked": p4,
+                "deactivated": deactivated,
+            })
+
+        if action == "process_inference_queue":
+            pm = PoolManager(db)
+            processed = pm.process_pending_inference_tasks(limit=payload.get("limit", 3))
+            emit({"ok": True, "processed": processed})
+
+        if action == "recheck_imagery":
+            pm = PoolManager(db)
+            post_count = pm.recheck_open_imagery(limit=payload.get("post_limit", 20))
+            pre_count = pm.recheck_pre_imagery(limit=payload.get("pre_limit", 20))
+            emit({"ok": True, "post_count": post_count, "pre_count": pre_count})
+
+        if action == "generate_daily_report":
+            report_date = payload.get("report_date")
+            if not report_date:
+                from datetime import date, timedelta
+                report_date = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+            rg = ReportGenerator()
+            rg.generate_pending_summaries(db, limit=payload.get("summary_limit", 100))
+            report = rg.generate_daily_report(db, report_date)
+            emit({
+                "ok": True,
+                "report_date": report_date,
+                "generated": bool(report),
+            })
+
         emit({"ok": False, "error": f"unknown action: {action}"}, 2)
     except SystemExit:
         raise

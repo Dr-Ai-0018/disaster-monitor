@@ -30,8 +30,17 @@ def _now_ms() -> int:
     return int(datetime.now(timezone.utc).timestamp() * 1000)
 
 
-def _has_real_imagery(event: Event) -> bool:
+def _has_any_real_imagery(event: Event) -> bool:
     return bool((event.pre_image_path and str(event.pre_image_path).strip()) or (event.post_image_path and str(event.post_image_path).strip()))
+
+
+def _has_complete_real_imagery(event: Event) -> bool:
+    return bool(
+        event.pre_image_path
+        and str(event.pre_image_path).strip()
+        and event.post_image_path
+        and str(event.post_image_path).strip()
+    )
 
 
 def _is_placeholder_inference(task: Optional[TaskQueue], product: Optional[Product]) -> bool:
@@ -249,9 +258,22 @@ def derive_workflow_state(
         "selected_image_type": selected_image_type,
     }
 
+    # Review/inference must only begin when both pre/post images exist as real files.
+    # If only one side exists, keep the item in imagery preparation even when legacy
+    # rows accidentally have quality flags or downstream rows.
+    if not _has_complete_real_imagery(event):
+        if event.status == "pool" or _has_any_real_imagery(event):
+            return {
+                "current_pool": "imagery_pool",
+                "pool_status": "await_imagery_preparation",
+                "auto_stage": "imagery_download",
+                "manual_stage": "image_review",
+                "selected_image_type": selected_image_type,
+            }
+        return state
+
     # Legacy compatibility: some historical rows already completed inference/materialization
-    # before workflow/image review tables existed, so they must not be pushed back to
-    # event/image-review pools even if imagery paths or review rows are missing now.
+    # before workflow/image review tables existed.
     if task is not None or product is not None:
         return _derive_post_review_state(
             task=task,
@@ -261,18 +283,6 @@ def derive_workflow_state(
             daily_report=daily_report,
             selected_image_type=selected_image_type,
         )
-
-    has_any_image = bool(event.pre_image_path or event.post_image_path)
-    if not has_any_image:
-        if event.status == "pool":
-            return {
-                "current_pool": "imagery_pool",
-                "pool_status": "await_imagery_preparation",
-                "auto_stage": "imagery_download",
-                "manual_stage": "image_review",
-                "selected_image_type": selected_image_type,
-            }
-        return state
 
     if not bool(event.quality_checked):
         state.update(
@@ -590,7 +600,7 @@ def _rollback_to_target_pool(
         workflow_item = ensure_workflow_item(db, event)
 
     requested_target = target_pool
-    if target_pool == "image_review_pool" and not _has_real_imagery(event):
+    if target_pool == "image_review_pool" and not _has_complete_real_imagery(event):
         target_pool = "imagery_pool"
 
     before_pool = workflow_item.current_pool
@@ -724,7 +734,7 @@ def rollback_to_reaudit_pool(
 
     task = db.query(TaskQueue).filter(TaskQueue.uuid == uuid).first()
     product = db.query(Product).filter(Product.uuid == uuid).first()
-    target_pool = "imagery_pool" if (_is_placeholder_inference(task, product) or not _has_real_imagery(event)) else "image_review_pool"
+    target_pool = "imagery_pool" if (_is_placeholder_inference(task, product) or not _has_complete_real_imagery(event)) else "image_review_pool"
     return _rollback_to_target_pool(db, uuid, target_pool=target_pool, operator=operator, commit=commit)
 
 

@@ -48,7 +48,14 @@ from schemas.schemas import (
 from services.legacy_bridge import run_legacy_action
 from services.batch_job_service import create_pool_batch_job, dispatch_batch_job, get_batch_job, request_cancel_batch_job
 from services.event_detail_fetcher import EventDetailFetcher
-from services.scheduler_service import job_fetch_event_details, job_fetch_rsoe
+from services.scheduler_service import (
+    job_fetch_event_details,
+    job_fetch_rsoe,
+    job_generate_report,
+    job_process_inference_queue,
+    job_process_pool,
+    job_recheck_imagery,
+)
 from services.workflow_service import (
     ensure_workflow_item,
     latest_image_review,
@@ -304,18 +311,16 @@ def _render_enhanced_preview(path: Path) -> Response:
     try:
         with Image.open(path) as img:
             arr = np.array(img.convert("RGB")).astype(np.float32)
-
-        result = np.zeros_like(arr)
-        for idx in range(3):
-            channel = arr[:, :, idx]
-            nonzero = channel[channel > 0]
-            if nonzero.size == 0:
-                result[:, :, idx] = channel
-                continue
-            p2, p98 = np.percentile(nonzero, (2, 98))
-            result[:, :, idx] = np.clip((channel - p2) / (p98 - p2 + 1e-6) * 255, 0, 255)
-
-        enhanced = Image.fromarray(result.astype("uint8"))
+            result = np.zeros_like(arr)
+            for idx in range(3):
+                channel = arr[:, :, idx]
+                nonzero = channel[channel > 0]
+                if nonzero.size == 0:
+                    result[:, :, idx] = channel
+                    continue
+                p2, p98 = np.percentile(nonzero, (2, 98))
+                result[:, :, idx] = np.clip((channel - p2) / (p98 - p2 + 1e-6) * 255, 0, 255)
+            enhanced = Image.fromarray(result.astype("uint8"))
         enhanced.thumbnail((1200, 1200))
         buf = io.BytesIO()
         enhanced.save(buf, format="PNG", optimize=True)
@@ -750,6 +755,38 @@ def manual_fetch_event_details(
 ):
     job_fetch_event_details()
     return ResetResponse(message="已手动执行事件详情补抓", affected=1)
+
+
+@router.post("/maintenance/process-pool", response_model=ResetResponse)
+def manual_process_pool(
+    _=Depends(get_current_admin),
+):
+    job_process_pool()
+    return ResetResponse(message="已手动执行影像准备链处理", affected=1)
+
+
+@router.post("/maintenance/recheck-imagery", response_model=ResetResponse)
+def manual_recheck_imagery(
+    _=Depends(get_current_admin),
+):
+    job_recheck_imagery()
+    return ResetResponse(message="已手动执行影像补全检查", affected=1)
+
+
+@router.post("/maintenance/process-inference-queue", response_model=ResetResponse)
+def manual_process_inference_queue(
+    _=Depends(get_current_admin),
+):
+    job_process_inference_queue()
+    return ResetResponse(message="已手动执行内部推理队列", affected=1)
+
+
+@router.post("/maintenance/generate-daily-report", response_model=ResetResponse)
+def manual_generate_daily_report(
+    _=Depends(get_current_admin),
+):
+    job_generate_report()
+    return ResetResponse(message="已手动执行日报生成", affected=1)
 
 
 @router.get("/report-candidates", response_model=ReportCandidateListResponse)
